@@ -7,6 +7,7 @@
  * - Planned sets per exercise (routine + workout)
  * - No forced set entry when opening Log
  * - Modal hide bug fixed via CSS
+ * - [NEW] Save active workout as future routine
  ***************/
 
 const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
@@ -411,6 +412,34 @@ function updateActivePlannedSets(exId, sets){
   item.sets = sets;
 }
 
+// *** NEW FUNCTION: Save current workout as future routine ***
+function saveActiveAsRoutine() {
+  if (!ACTIVE_SESSION) return;
+  const day = ACTIVE_SESSION.day;
+  
+  // Confirm before overwriting
+  const confirmed = confirm(
+    `Save this workout as your default routine for ${day}?\n\n` +
+    `Future ${day} workouts will start with these exercises in this order.`
+  );
+  if (!confirmed) return;
+
+  // Create a clean copy of the current order (exId and sets)
+  const newRoutine = ACTIVE_SESSION.order.map(item => ({
+    exId: item.exId,
+    sets: item.sets // Preserves the planned sets you adjusted during the workout
+  }));
+
+  // Update the DB
+  DB.routine[day] = newRoutine;
+  saveDB(DB);
+  
+  // Update UI to reflect changes
+  renderAll();
+  
+  alert(`Saved! This is now your default plan for ${day}.`);
+}
+
 function renderTodayWorkout(){
   const box = $("#todayWorkout");
   if (!ACTIVE_SESSION){
@@ -433,10 +462,19 @@ function renderTodayWorkout(){
     <hr class="hr">
     <div class="muted">Drag to reorder. Tap “Log” to enter sets (no sets are required).</div>
     <ul id="workoutList" class="list"></ul>
+    
+    <div class="row" style="margin-top:15px; justify-content:center;">
+      <button id="btnSaveRoutine" class="ghost" style="width:100%; color:var(--accent); border-color:var(--border);">
+        Save as ${ACTIVE_SESSION.day} Routine
+      </button>
+    </div>
   `;
 
   box.querySelector("#btnAddExerciseToWorkout").addEventListener("click", addExerciseToActiveSession);
   box.querySelector("#btnFinish").addEventListener("click", finishWorkout);
+  
+  // *** BIND THE NEW LISTENER ***
+  box.querySelector("#btnSaveRoutine").addEventListener("click", saveActiveAsRoutine);
 
   const ul = box.querySelector("#workoutList");
   const items = ACTIVE_SESSION.order;
