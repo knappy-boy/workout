@@ -59,7 +59,7 @@
       </div>
 
       <div class="card">
-        <div class="muted">Drag to reorder. Tap 🗑️ to remove from the day.</div>
+        <div class="muted">Drag to reorder. Set “planned sets” per exercise. Tap 🗑️ to remove from the day.</div>
         <ul id="routineList" class="list"></ul>
       </div>
     </section>
@@ -127,9 +127,31 @@
 
         <div class="card">
           <div class="row">
+            <div>
+              <div><strong>Plan</strong></div>
+              <div class="muted">Optional — planned working sets for this exercise today.</div>
+            </div>
+          </div>
+          <div class="grid">
+            <label>Planned sets
+              <input id="plannedSets" type="number" min="0" value="0" />
+            </label>
+            <label>&nbsp;
+              <div class="muted">Tip: you can change this mid-workout.</div>
+            </label>
+          </div>
+          <div class="row gap">
+            <button id="btnCopyLast" class="ghost">Copy last time</button>
+            <button id="btnAdd3" class="ghost">Add 3 sets</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row">
             <h4>Sets</h4>
             <button id="btnAddSet" class="ghost">+ Set</button>
           </div>
+          <div class="muted">Add sets only when you want — you’re not forced to log anything.</div>
           <div id="setsContainer"></div>
           <div class="row right">
             <button id="btnSaveSets" class="primary">Save</button>
