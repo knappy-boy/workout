@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b0b0b" />
+  <title>LiftLog (Offline)</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="title">
+      <h1>LiftLog</h1>
+      <div class="sub">Offline workout log</div>
+    </div>
+    <div class="top-actions">
+      <button id="btnExport" class="ghost">Export</button>
+      <label class="ghost file">
+        Import
+        <input id="fileImport" type="file" accept="application/json" />
+      </label>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="today">Today</button>
+    <button class="tab" data-tab="routine">Routine</button>
+    <button class="tab" data-tab="exercises">Exercises</button>
+    <button class="tab" data-tab="history">History</button>
+  </nav>
+
+  <main>
+    <!-- TODAY -->
+    <section id="tab-today" class="panel active">
+      <div class="row">
+        <div>
+          <h2 id="todayTitle">Today</h2>
+          <div class="muted" id="todayHint"></div>
+        </div>
+        <div class="row gap">
+          <select id="todayDay"></select>
+          <button id="btnStart" class="primary">Start Workout</button>
+        </div>
+      </div>
+
+      <div id="todayWorkout" class="card hidden"></div>
+      <div id="todayEmpty" class="card mutedbox"></div>
+    </section>
+
+    <!-- ROUTINE -->
+    <section id="tab-routine" class="panel">
+      <div class="row">
+        <h2>Weekly routine</h2>
+        <div class="row gap">
+          <select id="routineDay"></select>
+          <button id="btnAddToDay" class="primary">Add exercise</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="muted">Drag to reorder. Tap 🗑️ to remove from the day.</div>
+        <ul id="routineList" class="list"></ul>
+      </div>
+    </section>
+
+    <!-- EXERCISES -->
+    <section id="tab-exercises" class="panel">
+      <div class="row">
+        <h2>Exercises</h2>
+      </div>
+
+      <div class="card">
+        <h3>Add exercise</h3>
+        <div class="grid">
+          <label>Name
+            <input id="exName" placeholder="e.g., Bench Press" />
+          </label>
+          <label>Equipment
+            <select id="exEquip">
+              <option value="barbell">Barbell</option>
+              <option value="dumbbell">Dumbbell</option>
+              <option value="machine">Machine</option>
+              <option value="cable">Cable</option>
+              <option value="bodyweight">Bodyweight</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>Rep min
+            <input id="exRepMin" type="number" min="1" value="8" />
+          </label>
+          <label>Rep max
+            <input id="exRepMax" type="number" min="1" value="12" />
+          </label>
+          <label>Weight increment (kg)
+            <input id="exInc" type="number" step="0.5" min="0" value="2.5" />
+          </label>
+        </div>
+        <button id="btnAddExercise" class="primary">Add</button>
+      </div>
+
+      <div class="card">
+        <h3>Your exercise library</h3>
+        <div id="exerciseTable"></div>
+      </div>
+    </section>
+
+    <!-- HISTORY -->
+    <section id="tab-history" class="panel">
+      <div class="row">
+        <h2>History</h2>
+      </div>
+      <div id="historyList"></div>
+    </section>
+
+    <!-- MODAL -->
+    <div id="modal" class="modal hidden">
+      <div class="modal-inner">
+        <div class="row">
+          <h3 id="modalTitle">Log</h3>
+          <button id="btnCloseModal" class="ghost">Close</button>
+        </div>
+
+        <div id="lastTime" class="card mutedbox"></div>
+
+        <div id="suggestion" class="card"></div>
+
+        <div class="card">
+          <div class="row">
+            <h4>Sets</h4>
+            <button id="btnAddSet" class="ghost">+ Set</button>
+          </div>
+          <div id="setsContainer"></div>
+          <div class="row right">
+            <button id="btnSaveSets" class="primary">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script src="app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./sw.js");
+    }
+  </script>
+</body>
+</html>
