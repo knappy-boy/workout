@@ -1,816 +1,642 @@
-/***************
- * LiftLog MVP v2
- * Offline-first, localStorage DB, PWA
- * Now supports:
- * - Freestyle workouts (no plan required)
- * - Add exercises mid-workout
- * - Planned sets per exercise (routine + workout)
- * - No forced set entry when opening Log
- * - Modal hide bug fixed via CSS
- * - [NEW] Save active workout as future routine
- ***************/
+/**
+ * LIFTLOG ULTRA - Neobrutalist Edition
+ * 2026 Refactor
+ */
 
-const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
-const LS_KEY = "liftlog_db_v2";
+const DB_KEY = "liftlog_ultra_v1";
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-const $ = (sel) => document.querySelector(sel);
-
-function uid() { return Math.random().toString(16).slice(2) + Date.now().toString(16); }
-function todayISO() { return new Date().toISOString().slice(0,10); }
-function prettyDate(iso){
-  const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString(undefined, { weekday:"short", year:"numeric", month:"short", day:"numeric" });
-}
-function escapeHtml(s){
-  return String(s).replace(/[&<>"']/g, c => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
-  }[c]));
-}
-
-function defaultIncForEquip(equip){
-  if (equip === "barbell") return 2.5;
-  if (equip === "dumbbell") return 2.0;
-  if (equip === "machine" || equip === "cable") return 1.0;
-  if (equip === "bodyweight") return 0;
-  return 1.0;
-}
-
-function normalizeRoutineDay(arr){
-  // v1: ["exId","exId"]
-  // v2: [{exId, sets}]
-  if (!Array.isArray(arr)) return [];
-  if (arr.length === 0) return [];
-  if (typeof arr[0] === "string"){
-    return arr.map(exId => ({ exId, sets: 3 }));
-  }
-  // if already objects
-  return arr
-    .filter(x => x && typeof x === "object" && x.exId)
-    .map(x => ({ exId: x.exId, sets: Number.isFinite(+x.sets) ? +x.sets : 3 }));
-}
-
-function migrateDB(db){
-  if (!db || typeof db !== "object") return null;
-
-  // Ensure base structure
-  db.exercises = db.exercises || {};
-  db.routine = db.routine || Object.fromEntries(DAYS.map(d => [d, []]));
-  db.sessions = Array.isArray(db.sessions) ? db.sessions : [];
-
-  // Normalize routine days
-  for (const d of DAYS){
-    db.routine[d] = normalizeRoutineDay(db.routine[d]);
-  }
-
-  // Sessions: add order if missing
-  db.sessions = db.sessions.map(sess => {
-    if (!sess || typeof sess !== "object") return sess;
-    sess.entries = sess.entries || {};
-    if (!Array.isArray(sess.order)){
-      // best-effort: infer from stored entries keys
-      const keys = Object.keys(sess.entries);
-      sess.order = keys.map(exId => ({ exId, sets: 0 }));
-    } else {
-      sess.order = normalizeRoutineDay(sess.order);
-    }
-    return sess;
-  });
-
-  return db;
-}
-
-function loadDB(){
-  const raw = localStorage.getItem(LS_KEY) || localStorage.getItem("liftlog_db_v1");
-  if (raw){
-    const parsed = JSON.parse(raw);
-    const migrated = migrateDB(parsed);
-    localStorage.setItem(LS_KEY, JSON.stringify(migrated));
-    return migrated;
-  }
-  const db = {
-    exercises: {}, // id -> {id,name,equip,repMin,repMax,incKg}
-    routine: Object.fromEntries(DAYS.map(d => [d, []])), // day -> [{exId, sets}]
-    sessions: [] // {id,date,day,order:[{exId,sets}], entries:{ exId:[{w,r}], ... }}
-  };
-  localStorage.setItem(LS_KEY, JSON.stringify(db));
-  return db;
-}
-function saveDB(db){ localStorage.setItem(LS_KEY, JSON.stringify(db)); }
+// --- DEFAULT DATA & MIGRATION ---
+const DEFAULT_DB = {
+  user: { theme: "light", increment: 2.5 },
+  exercises: {}, // id -> {id, name, type, muscle, equip, increment}
+  templates: {}, // id -> {id, name, exercises: [{exId, sets}]}
+  sessions: [],  // [{id, start, end, name, entries: {exId: [{w, r, note, type}] } }]
+  bodyweight: [], // [{date, kg}]
+  goals: {}
+};
 
 let DB = loadDB();
+let ACTIVE_SESSION = null; 
+let WORKOUT_TIMER = null;
 
-/***************
- * Tabs
- ***************/
-document.querySelectorAll(".tab").forEach(btn=>{
-  btn.addEventListener("click", ()=>{
-    document.querySelectorAll(".tab").forEach(b=>b.classList.remove("active"));
-    document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
+function uid() { return Date.now().toString(36) + Math.random().toString(36).substr(2); }
+
+function loadDB() {
+  const str = localStorage.getItem(DB_KEY);
+  if (!str) return JSON.parse(JSON.stringify(DEFAULT_DB));
+  
+  const data = JSON.parse(str);
+  // Simple migration checks
+  if (!data.bodyweight) data.bodyweight = [];
+  if (!data.templates) data.templates = {};
+  if (!data.user) data.user = { theme: "light" };
+  
+  // Apply theme immediately
+  document.body.className = `theme-${data.user.theme}`;
+  return data;
+}
+
+function saveDB() {
+  localStorage.setItem(DB_KEY, JSON.stringify(DB));
+}
+
+// --- DOM HELPERS ---
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+
+// --- TABS & NAVIGATION ---
+$$(".tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    $$(".tab").forEach(b => b.classList.remove("active"));
+    $$(".panel").forEach(p => p.classList.remove("active"));
     btn.classList.add("active");
     $("#tab-" + btn.dataset.tab).classList.add("active");
-    renderAll();
+    renderCurrentTab(btn.dataset.tab);
   });
 });
 
-/***************
- * Populate selects
- ***************/
-function fillDaySelect(selId){
-  const sel = $(selId);
-  sel.innerHTML = "";
-  DAYS.forEach(d=>{
-    const o = document.createElement("option");
-    o.value = d; o.textContent = d;
-    sel.appendChild(o);
-  });
-}
-fillDaySelect("#todayDay");
-fillDaySelect("#routineDay");
-
-// Default selected day: today
-$("#todayDay").value = DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
-$("#routineDay").value = $("#todayDay").value;
-
-/***************
- * Exercises
- ***************/
-$("#exEquip").addEventListener("change", ()=>{
-  $("#exInc").value = defaultIncForEquip($("#exEquip").value);
-});
-
-$("#btnAddExercise").addEventListener("click", ()=>{
-  const name = $("#exName").value.trim();
-  if (!name) return alert("Give the exercise a name.");
-  const equip = $("#exEquip").value;
-  const repMin = parseInt($("#exRepMin").value,10) || 8;
-  const repMax = parseInt($("#exRepMax").value,10) || 12;
-  const incKg = parseFloat($("#exInc").value);
-  const finalInc = Number.isFinite(incKg) ? incKg : defaultIncForEquip(equip);
-
-  const id = uid();
-  DB.exercises[id] = { id, name, equip, repMin, repMax, incKg: finalInc };
-  saveDB(DB);
-
-  $("#exName").value = "";
-  renderAll();
-});
-
-function deleteExercise(id){
-  if (!confirm("Delete this exercise? It will also disappear from your routine (history stays).")) return;
-  delete DB.exercises[id];
-  // remove from routine
-  for (const d of DAYS){
-    DB.routine[d] = DB.routine[d].filter(x => x.exId !== id);
-  }
-  saveDB(DB);
-  renderAll();
+function renderCurrentTab(tab) {
+  if (tab === "dashboard") renderDashboard();
+  if (tab === "workout") renderWorkoutTab();
+  if (tab === "exercises") renderExerciseLibrary();
+  if (tab === "history") renderHistory();
+  if (tab === "stats") renderStats();
 }
 
-function renderExerciseTable(){
-  const container = $("#exerciseTable");
-  const ids = Object.keys(DB.exercises);
-  if (ids.length === 0){
-    container.innerHTML = `<div class="muted">No exercises yet. Add a few above.</div>`;
+// --- DASHBOARD ---
+function renderDashboard() {
+  drawBodyweightChart();
+  renderCalendar();
+  $("#bwInput").value = "";
+}
+
+$("#btnLogBW").addEventListener("click", () => {
+  const kg = parseFloat($("#bwInput").value);
+  if (!kg) return;
+  DB.bodyweight.push({ date: new Date().toISOString(), kg });
+  DB.bodyweight.sort((a,b) => new Date(a.date) - new Date(b.date));
+  saveDB();
+  drawBodyweightChart();
+  $("#bwInput").value = "";
+});
+
+function drawBodyweightChart() {
+  const ctx = $("#bwChart").getContext("2d");
+  const data = DB.bodyweight.slice(-14); // Last 14 entries
+  if (data.length < 2) {
+    ctx.clearRect(0,0,300,150);
+    ctx.font = "14px monospace";
+    ctx.fillText("Log more data to see chart", 50, 75);
     return;
   }
-  const rows = ids
-    .map(id => DB.exercises[id])
-    .sort((a,b)=>a.name.localeCompare(b.name))
-    .map(ex => `
-      <tr>
-        <td>${escapeHtml(ex.name)}</td>
-        <td><span class="pill">${escapeHtml(ex.equip)}</span></td>
-        <td>${ex.repMin}–${ex.repMax}</td>
-        <td>${ex.incKg}</td>
-        <td><button class="smallbtn" data-del="${ex.id}">🗑️</button></td>
-      </tr>
-    `).join("");
-
-  container.innerHTML = `
-    <table class="table">
-      <thead><tr><th>Name</th><th>Equip</th><th>Reps</th><th>Inc (kg)</th><th></th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-  `;
-  container.querySelectorAll("[data-del]").forEach(btn=>{
-    btn.addEventListener("click", ()=>deleteExercise(btn.dataset.del));
-  });
-}
-
-/***************
- * Pickers
- ***************/
-function sortedExerciseList(){
-  return Object.values(DB.exercises).sort((a,b)=>a.name.localeCompare(b.name));
-}
-
-function pickExercisePrompt(){
-  const list = sortedExerciseList();
-  if (list.length === 0){
-    alert("Add exercises first (Exercises tab).");
-    return null;
-  }
-  const lines = list.map((ex,i)=>`${i+1}. ${ex.name} (${ex.equip})`).join("\n");
-  const pick = prompt(`Type the number:\n\n${lines}`);
-  if (!pick) return null;
-  const idx = parseInt(pick,10) - 1;
-  if (Number.isNaN(idx) || idx < 0 || idx >= list.length){
-    alert("Invalid choice.");
-    return null;
-  }
-  return list[idx].id;
-}
-
-function promptPlannedSets(defaultSets = 3){
-  const raw = prompt(`Planned working sets? (default ${defaultSets})`, String(defaultSets));
-  if (raw === null) return null;
-  const n = parseInt(raw,10);
-  if (Number.isNaN(n) || n < 0) return defaultSets;
-  return n;
-}
-
-/***************
- * Routine
- ***************/
-$("#btnAddToDay").addEventListener("click", ()=>{
-  const day = $("#routineDay").value;
-  const exId = pickExercisePrompt();
-  if (!exId) return;
-
-  const sets = promptPlannedSets(3);
-  if (sets === null) return;
-
-  DB.routine[day].push({ exId, sets });
-  saveDB(DB);
-  renderAll();
-});
-
-function removeFromDay(day, exId){
-  DB.routine[day] = DB.routine[day].filter(x=>x.exId!==exId);
-  saveDB(DB);
-  renderAll();
-}
-
-function updateRoutineSets(day, exId, sets){
-  const item = DB.routine[day].find(x=>x.exId===exId);
-  if (!item) return;
-  item.sets = sets;
-  saveDB(DB);
-}
-
-function renderRoutine(){
-  const day = $("#routineDay").value;
-  const ul = $("#routineList");
-  const items = DB.routine[day] || [];
-
-  if (items.length === 0){
-    ul.innerHTML = `<li class="li"><div class="muted">Nothing planned for ${day}. Tap “Add exercise”.</div></li>`;
-    return;
-  }
-
-  ul.innerHTML = "";
-  items.forEach((it, index)=>{
-    const ex = DB.exercises[it.exId] || { name:"(deleted exercise)", equip:"", repMin:8, repMax:12 };
-    const li = document.createElement("li");
-    li.className = "li drag";
-    li.draggable = true;
-    li.dataset.exId = it.exId;
-    li.dataset.index = String(index);
-    li.innerHTML = `
-      <div class="left">
-        <div><strong>${escapeHtml(ex.name)}</strong></div>
-        <div class="badge">${escapeHtml(ex.equip)} • ${ex.repMin ?? ""}${ex.repMax ? "–"+ex.repMax : ""} reps</div>
-      </div>
-      <div class="inline">
-        <label style="margin:0;color:var(--muted);font-size:12px;">Sets
-          <input type="number" min="0" class="routineSets" value="${Number.isFinite(+it.sets) ? +it.sets : 3}">
-        </label>
-        <button class="smallbtn" data-rm="${it.exId}">🗑️</button>
-      </div>
-    `;
-    ul.appendChild(li);
-  });
-
-  ul.querySelectorAll("[data-rm]").forEach(btn=>{
-    btn.addEventListener("click", ()=>removeFromDay(day, btn.dataset.rm));
-  });
-
-  ul.querySelectorAll(".routineSets").forEach((inp, i)=>{
-    inp.addEventListener("change", ()=>{
-      const n = parseInt(inp.value,10);
-      const sets = (Number.isNaN(n) || n < 0) ? 0 : n;
-      inp.value = String(sets);
-      const exId = items[i].exId;
-      updateRoutineSets(day, exId, sets);
-    });
-  });
-
-  // Drag & drop reorder
-  let dragIndex = null;
-  ul.querySelectorAll(".drag").forEach(li=>{
-    li.addEventListener("dragstart", (e)=>{
-      dragIndex = parseInt(li.dataset.index,10);
-      e.dataTransfer.effectAllowed = "move";
-    });
-    li.addEventListener("dragover", (e)=>{ e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
-    li.addEventListener("drop", (e)=>{
-      e.preventDefault();
-      const dropIndex = parseInt(li.dataset.index,10);
-      if (dragIndex === null || dropIndex === dragIndex) return;
-
-      const arr = DB.routine[day];
-      const [moved] = arr.splice(dragIndex,1);
-      arr.splice(dropIndex,0,moved);
-      DB.routine[day] = arr;
-      saveDB(DB);
-      dragIndex = null;
-      renderAll();
-    });
-  });
-}
-
-/***************
- * Today + Workout logging
- ***************/
-let ACTIVE_SESSION = null; // {id,date,day,order:[{exId,sets}], entries:{}}
-
-$("#btnStart").addEventListener("click", ()=>{
-  const day = $("#todayDay").value;
-  const planned = DB.routine[day] || [];
-
-  if (planned.length === 0){
-    const ok = confirm(`No plan for ${day}.\n\nStart a freestyle workout and add exercises as you go?`);
-    if (!ok) return;
-    ACTIVE_SESSION = { id: uid(), date: todayISO(), day, order: [], entries: {} };
-  } else {
-    // copy routine into workout order
-    ACTIVE_SESSION = {
-      id: uid(),
-      date: todayISO(),
-      day,
-      order: planned.map(it => ({ exId: it.exId, sets: Number.isFinite(+it.sets) ? +it.sets : 3 })),
-      entries: {}
-    };
-  }
-
-  $("#todayWorkout").classList.remove("hidden");
-  renderTodayWorkout();
-});
-
-function renderToday(){
-  const day = $("#todayDay").value;
-  $("#todayTitle").textContent = `Today — ${day}`;
-
-  const planned = DB.routine[day] || [];
-
-  if (ACTIVE_SESSION){
-    $("#todayHint").textContent = "Workout in progress.";
-  } else if (planned.length === 0){
-    $("#todayHint").textContent = "No plan today — start freestyle and add exercises when you want.";
-  } else {
-    $("#todayHint").textContent = `${planned.length} exercises planned.`;
-  }
-
-  if (!ACTIVE_SESSION && planned.length === 0){
-    $("#todayEmpty").innerHTML = `
-      <div><strong>No plan for ${day}</strong></div>
-      <div class="muted">You can still Start Workout to run freestyle, then “+ Add exercise”.</div>
-    `;
-    $("#todayWorkout").classList.add("hidden");
-  } else if (!ACTIVE_SESSION && planned.length > 0){
-    $("#todayEmpty").innerHTML = `
-      <div><strong>${planned.length} exercises planned</strong></div>
-      <div class="muted">Start workout, then tap an exercise to log sets.</div>
-    `;
-    $("#todayWorkout").classList.add("hidden");
-  } else {
-    $("#todayEmpty").innerHTML = "";
-  }
-}
-
-function addExerciseToActiveSession(){
-  if (!ACTIVE_SESSION) return;
-  const exId = pickExercisePrompt();
-  if (!exId) return;
-
-  if (ACTIVE_SESSION.order.some(x => x.exId === exId)){
-    alert("That exercise is already in this workout.");
-    return;
-  }
-
-  const sets = promptPlannedSets(3);
-  if (sets === null) return;
-
-  ACTIVE_SESSION.order.push({ exId, sets });
-  renderTodayWorkout();
-}
-
-function updateActivePlannedSets(exId, sets){
-  if (!ACTIVE_SESSION) return;
-  const item = ACTIVE_SESSION.order.find(x => x.exId === exId);
-  if (!item) return;
-  item.sets = sets;
-}
-
-// *** NEW FUNCTION: Save current workout as future routine ***
-function saveActiveAsRoutine() {
-  if (!ACTIVE_SESSION) return;
-  const day = ACTIVE_SESSION.day;
   
-  // Confirm before overwriting
-  const confirmed = confirm(
-    `Save this workout as your default routine for ${day}?\n\n` +
-    `Future ${day} workouts will start with these exercises in this order.`
-  );
-  if (!confirmed) return;
-
-  // Create a clean copy of the current order (exId and sets)
-  const newRoutine = ACTIVE_SESSION.order.map(item => ({
-    exId: item.exId,
-    sets: item.sets // Preserves the planned sets you adjusted during the workout
-  }));
-
-  // Update the DB
-  DB.routine[day] = newRoutine;
-  saveDB(DB);
-  
-  // Update UI to reflect changes
-  renderAll();
-  
-  alert(`Saved! This is now your default plan for ${day}.`);
+  const labels = data.map(d => new Date(d.date).getDate());
+  const values = data.map(d => d.kg);
+  simpleLineChart(ctx, labels, values, "#FF3333");
 }
 
-function renderTodayWorkout(){
-  const box = $("#todayWorkout");
-  if (!ACTIVE_SESSION){
-    box.innerHTML = "";
-    box.classList.add("hidden");
-    return;
-  }
-
-  box.innerHTML = `
-    <div class="row">
-      <div>
-        <div><strong>Workout in progress</strong></div>
-        <div class="muted">${prettyDate(ACTIVE_SESSION.date)} • ${escapeHtml(ACTIVE_SESSION.day)}</div>
-      </div>
-      <div class="row gap">
-        <button id="btnAddExerciseToWorkout" class="ghost">+ Add exercise</button>
-        <button id="btnFinish" class="primary">Finish</button>
-      </div>
-    </div>
-    <hr class="hr">
-    <div class="muted">Drag to reorder. Tap “Log” to enter sets (no sets are required).</div>
-    <ul id="workoutList" class="list"></ul>
+function renderCalendar() {
+  const grid = $("#calendarGrid");
+  grid.innerHTML = "";
+  
+  // Last 28 days
+  const today = new Date();
+  for (let i = 27; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(today.getDate() - i);
+    const iso = d.toISOString().split("T")[0];
     
-    <div class="row" style="margin-top:15px; justify-content:center;">
-      <button id="btnSaveRoutine" class="ghost" style="width:100%; color:var(--accent); border-color:var(--border);">
-        Save as ${ACTIVE_SESSION.day} Routine
-      </button>
-    </div>
-  `;
+    const div = document.createElement("div");
+    div.className = "cal-day";
+    div.textContent = d.getDate();
+    if (i === 0) div.classList.add("today");
+    
+    // Check if workout existed
+    const hasWorkout = DB.sessions.some(s => s.start.startsWith(iso));
+    if (hasWorkout) div.classList.add("active");
+    
+    grid.appendChild(div);
+  }
+}
 
-  box.querySelector("#btnAddExerciseToWorkout").addEventListener("click", addExerciseToActiveSession);
-  box.querySelector("#btnFinish").addEventListener("click", finishWorkout);
+// --- EXERCISES ---
+const MUSCLE_GROUPS = ["Push", "Pull", "Legs", "Core", "Cardio", "Other"];
+
+function renderExerciseLibrary() {
+  const container = $("#exerciseList");
+  container.innerHTML = "";
   
-  // *** BIND THE NEW LISTENER ***
-  box.querySelector("#btnSaveRoutine").addEventListener("click", saveActiveAsRoutine);
-
-  const ul = box.querySelector("#workoutList");
-  const items = ACTIVE_SESSION.order;
-
-  if (items.length === 0){
-    ul.innerHTML = `<li class="li"><div class="muted">No exercises yet. Tap “+ Add exercise”.</div></li>`;
-    return;
-  }
-
-  ul.innerHTML = "";
-  items.forEach((it, index)=>{
-    const ex = DB.exercises[it.exId] || { name:"(deleted exercise)", equip:"", repMin:8, repMax:12, incKg:2.5 };
-    const logged = (ACTIVE_SESSION.entries[it.exId] || []).length;
-    const plannedSets = Number.isFinite(+it.sets) ? +it.sets : 0;
-
-    const li = document.createElement("li");
-    li.className = "li drag";
-    li.draggable = true;
-    li.dataset.exId = it.exId;
-    li.dataset.index = String(index);
-
-    li.innerHTML = `
-      <div class="left">
-        <div><strong>${escapeHtml(ex.name)}</strong> <span class="pill">${escapeHtml(ex.equip)}</span></div>
-        <div class="badge">Target reps: ${ex.repMin}–${ex.repMax} • Planned sets: ${plannedSets} • Logged: ${logged}</div>
-      </div>
-      <div class="inline">
-        <label style="margin:0;color:var(--muted);font-size:12px;">Sets
-          <input type="number" min="0" class="workoutSets" value="${plannedSets}">
-        </label>
-        <button class="smallbtn" data-log="${it.exId}">Log</button>
-      </div>
+  const filter = $("#filterMuscle").value;
+  const search = $("#searchEx").value.toLowerCase();
+  
+  const list = Object.values(DB.exercises).sort((a,b) => a.name.localeCompare(b.name));
+  
+  list.forEach(ex => {
+    if (filter && ex.muscle !== filter) return;
+    if (search && !ex.name.toLowerCase().includes(search)) return;
+    
+    const div = document.createElement("div");
+    div.className = `ex-item ex-cat-${ex.muscle || 'Other'}`;
+    div.innerHTML = `
+      <span>${ex.name} <span class="muscle-tag">${ex.muscle || 'Gen'}</span></span>
+      <button class="btn-ghost icon-btn" onclick="editExercise('${ex.id}')">✎</button>
     `;
-    ul.appendChild(li);
-  });
-
-  // planned sets inputs
-  ul.querySelectorAll(".workoutSets").forEach((inp, i)=>{
-    inp.addEventListener("change", ()=>{
-      const n = parseInt(inp.value,10);
-      const sets = (Number.isNaN(n) || n < 0) ? 0 : n;
-      inp.value = String(sets);
-      const exId = items[i].exId;
-      updateActivePlannedSets(exId, sets);
-    });
-  });
-
-  // log buttons
-  ul.querySelectorAll("[data-log]").forEach(btn=>{
-    btn.addEventListener("click", ()=>openLogModal(btn.dataset.log));
-  });
-
-  // Drag & drop reorder within active workout
-  let dragIndex = null;
-  ul.querySelectorAll(".drag").forEach(li=>{
-    li.addEventListener("dragstart", (e)=>{
-      dragIndex = parseInt(li.dataset.index,10);
-      e.dataTransfer.effectAllowed = "move";
-    });
-    li.addEventListener("dragover", (e)=>{ e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
-    li.addEventListener("drop", (e)=>{
-      e.preventDefault();
-      const dropIndex = parseInt(li.dataset.index,10);
-      if (dragIndex === null || dropIndex === dragIndex) return;
-
-      const arr = ACTIVE_SESSION.order;
-      const [moved] = arr.splice(dragIndex,1);
-      arr.splice(dropIndex,0,moved);
-      ACTIVE_SESSION.order = arr;
-      dragIndex = null;
-      renderTodayWorkout();
-    });
+    container.appendChild(div);
   });
 }
 
-function finishWorkout(){
-  if (!ACTIVE_SESSION) return;
-
-  const didAnything = Object.values(ACTIVE_SESSION.entries).some(arr => (arr||[]).length > 0);
-  if (!didAnything){
-    const ok = confirm("No sets logged. Discard this workout?");
-    if (!ok) return;
-    ACTIVE_SESSION = null;
-    renderAll();
-    return;
-  }
-
-  DB.sessions.unshift(ACTIVE_SESSION);
-  saveDB(DB);
-  ACTIVE_SESSION = null;
-  alert("Workout saved.");
-  renderAll();
+// Populate Dropdowns
+function populateSelects() {
+  const muscles = $("#newExMuscle");
+  const filter = $("#filterMuscle");
+  
+  [muscles, filter].forEach(sel => {
+    if(!sel) return;
+    sel.innerHTML = sel === filter ? '<option value="">All Muscles</option>' : '';
+    MUSCLE_GROUPS.forEach(m => {
+      const opt = document.createElement("option");
+      opt.value = m; opt.textContent = m;
+      sel.appendChild(opt);
+    });
+  });
+  
+  $("#newExEquip").innerHTML = `
+    <option value="barbell">Barbell</option>
+    <option value="dumbbell">Dumbbell</option>
+    <option value="machine">Machine</option>
+    <option value="cable">Cable</option>
+    <option value="bodyweight">Bodyweight</option>
+  `;
 }
 
-/***************
- * Modal logger
- ***************/
-let MODAL_EX_ID = null;
-let MODAL_LAST = null;
-let MODAL_SUGGESTED_WEIGHT = "";
+$("#btnShowAddEx").addEventListener("click", () => {
+  $("#addExModal").showModal();
+});
 
-$("#btnCloseModal").addEventListener("click", closeModal);
-$("#btnAddSet").addEventListener("click", ()=>addSetRow());
-$("#btnSaveSets").addEventListener("click", saveModalSets);
-$("#btnCopyLast").addEventListener("click", copyLastToModal);
-$("#btnAdd3").addEventListener("click", addThreeSets);
+$("#btnCloseExModal").addEventListener("click", () => $("#addExModal").close());
 
-function openLogModal(exId){
-  if (!ACTIVE_SESSION) return;
-  MODAL_EX_ID = exId;
+$("#newExType").addEventListener("change", (e) => {
+   if(e.target.value === 'cardio') $("#strengthOptions").classList.add("hidden");
+   else $("#strengthOptions").classList.remove("hidden");
+});
 
-  const ex = DB.exercises[exId] || { name:"(deleted exercise)", equip:"", repMin:8, repMax:12, incKg:2.5 };
-  $("#modalTitle").textContent = ex.name;
+$("#btnSaveEx").addEventListener("click", () => {
+  const name = $("#newExName").value.trim();
+  if (!name) return;
+  
+  const id = uid();
+  const type = $("#newExType").value;
+  DB.exercises[id] = {
+    id,
+    name,
+    type,
+    muscle: $("#newExMuscle").value,
+    equip: $("#newExEquip").value,
+    increment: parseFloat($("#newExInc").value) || 2.5
+  };
+  saveDB();
+  $("#addExModal").close();
+  renderExerciseLibrary();
+});
 
-  // planned sets from active session order
-  const item = ACTIVE_SESSION.order.find(x => x.exId === exId);
-  $("#plannedSets").value = item ? String(Number.isFinite(+item.sets) ? +item.sets : 0) : "0";
-
-  // Last time
-  MODAL_LAST = findLastExerciseEntry(exId);
-  if (!MODAL_LAST){
-    $("#lastTime").innerHTML = `<strong>Last time:</strong> <span class="muted">No history yet.</span>`;
+// --- WORKOUT LOGGING ---
+function renderWorkoutTab() {
+  if (ACTIVE_SESSION) {
+    $("#startWorkoutPanel").classList.add("hidden");
+    $("#activeWorkoutPanel").classList.remove("hidden");
+    renderActiveSession();
+    startTimer();
   } else {
-    const sets = MODAL_LAST.sets.map((s,i)=>`Set ${i+1}: ${s.w} kg × ${s.r}`).join("<br/>");
-    $("#lastTime").innerHTML = `<strong>Last time (${prettyDate(MODAL_LAST.date)}):</strong><br/>${sets}`;
+    $("#startWorkoutPanel").classList.remove("hidden");
+    $("#activeWorkoutPanel").classList.add("hidden");
+    stopTimer();
+    renderTemplates();
   }
+}
 
-  // Suggestion
-  const suggestion = computeSuggestion(exId, MODAL_LAST);
-  MODAL_SUGGESTED_WEIGHT = suggestion.weight;
-  $("#suggestion").innerHTML = `
-    <div class="row">
-      <div>
-        <div><strong>Suggestion</strong></div>
-        <div class="muted">${suggestion.explain}</div>
+function startTimer() {
+  if (WORKOUT_TIMER) return;
+  const start = new Date(ACTIVE_SESSION.start).getTime();
+  WORKOUT_TIMER = setInterval(() => {
+    const diff = Math.floor((Date.now() - start) / 1000);
+    const m = Math.floor(diff / 60).toString().padStart(2, '0');
+    const s = (diff % 60).toString().padStart(2, '0');
+    $("#workoutTimer").textContent = `${m}:${s}`;
+  }, 1000);
+}
+
+function stopTimer() {
+  if (WORKOUT_TIMER) clearInterval(WORKOUT_TIMER);
+  WORKOUT_TIMER = null;
+}
+
+// Starting
+$("#btnStartEmpty").addEventListener("click", () => startWorkout());
+$("#btnStartTemplate").addEventListener("click", () => {
+  const tId = $("#templateSelect").value;
+  if (!tId) return alert("Select a template");
+  startWorkout(DB.templates[tId]);
+});
+
+function startWorkout(template = null) {
+  if (ACTIVE_SESSION && !confirm("Overwrite current workout?")) return;
+  
+  ACTIVE_SESSION = {
+    id: uid(),
+    start: new Date().toISOString(),
+    entries: {}, // exId -> []
+    order: [] // list of exIds to maintain order
+  };
+  
+  if (template) {
+    template.exercises.forEach(item => {
+      ACTIVE_SESSION.order.push(item.exId);
+      // Pre-fill planned sets? For now just adding exercise to list
+    });
+  }
+  
+  saveDB(); // Persist active state (could save to separate 'active' key)
+  renderWorkoutTab();
+}
+
+function renderActiveSession() {
+  const list = $("#activeExerciseList");
+  list.innerHTML = "";
+  
+  ACTIVE_SESSION.order.forEach((exId, idx) => {
+    const ex = DB.exercises[exId];
+    if (!ex) return;
+    const sets = ACTIVE_SESSION.entries[exId] || [];
+    const isDone = sets.length > 0;
+    
+    const div = document.createElement("div");
+    div.className = "neo-card bg-white mb-2 p-2";
+    div.innerHTML = `
+      <div class="row">
+        <strong>${ex.name}</strong>
+        <button class="btn-ghost" onclick="openLogger('${exId}')">${isDone ? 'EDIT' : 'LOG'}</button>
       </div>
-      <div class="pill">${suggestion.weightText}</div>
-    </div>
-  `;
+      <div class="muted small">${sets.length} sets logged</div>
+      `;
+    list.appendChild(div);
+  });
+}
 
-  // Sets UI: DO NOT pre-fill unless sets already logged in this session
-  $("#setsContainer").innerHTML = "";
-  const current = ACTIVE_SESSION.entries[exId] || [];
-  if (current.length > 0){
-    current.forEach(s=>addSetRow(s.w, s.r));
+$("#btnAddExToWorkout").addEventListener("click", () => {
+  openExercisePicker((exId) => {
+    if (!ACTIVE_SESSION.order.includes(exId)) {
+      ACTIVE_SESSION.order.push(exId);
+      renderActiveSession();
+    }
+  });
+});
+
+$("#btnFinishWorkout").addEventListener("click", () => {
+  if (!confirm("Finish and save workout?")) return;
+  ACTIVE_SESSION.end = new Date().toISOString();
+  DB.sessions.unshift(ACTIVE_SESSION);
+  ACTIVE_SESSION = null;
+  saveDB();
+  renderWorkoutTab();
+  // Go to history
+  $(".tab[data-tab='history']").click();
+});
+
+// --- LOGGING MODAL ---
+let CURRENT_LOG_EX = null;
+
+function openLogger(exId) {
+  CURRENT_LOG_EX = exId;
+  const ex = DB.exercises[exId];
+  $("#logModalTitle").textContent = ex.name;
+  
+  // Headers based on type
+  const headers = $("#logHeaders");
+  if (ex.type === 'cardio') {
+    headers.querySelector(".h-val-1").textContent = "MINS";
+    headers.querySelector(".h-val-2").textContent = "KM";
   } else {
-    // leave empty by default (your request)
-    // user can press + Set or Copy last time
+    headers.querySelector(".h-val-1").textContent = "KG";
+    headers.querySelector(".h-val-2").textContent = "REPS";
+  }
+  
+  const container = $("#logRows");
+  container.innerHTML = "";
+  
+  // Get existing logs OR Auto-fill from history
+  const currentLogs = ACTIVE_SESSION.entries[exId] || [];
+  
+  if (currentLogs.length === 0) {
+    // Attempt Auto-fill
+    const lastSession = findLastSessionWithExercise(exId);
+    if (lastSession) {
+      $("#prevSessionInfo").textContent = `Last time: ${new Date(lastSession.date).toLocaleDateString()} (${lastSession.sets.length} sets)`;
+      // Add rows for each set done last time
+      lastSession.sets.forEach(s => addLogRow(ex, s, true));
+    } else {
+      $("#prevSessionInfo").textContent = "No history available.";
+      addLogRow(ex);
+    }
+  } else {
+    $("#prevSessionInfo").textContent = "Editing current session.";
+    currentLogs.forEach(s => addLogRow(ex, s, false));
+  }
+  
+  $("#logModal").classList.remove("hidden");
+}
+
+function addLogRow(ex, data = null, isGhost = false) {
+  const row = document.createElement("div");
+  row.className = "log-row";
+  
+  const val1 = data ? (ex.type==='cardio' ? data.time : data.w) : "";
+  const val2 = data ? (ex.type==='cardio' ? data.dist : data.r) : "";
+  
+  // Suggestion logic (Weight Increment)
+  let placeholder1 = "";
+  let placeholder2 = "";
+  let val1Attrs = `class="neo-input input-val-1" type="number" step="${ex.increment || 1}"`;
+  
+  if (isGhost && data) {
+    // If auto-filling, apply suggestion logic
+    // E.g. if last reps >= 12, suggest weight + increment
+    if (ex.type !== 'cardio') {
+       let w = parseFloat(data.w);
+       let r = parseInt(data.r);
+       if (r >= 12) w += (ex.increment || 2.5); // Logic: hit max reps, inc weight
+       placeholder1 = w;
+       placeholder2 = r; // Maintain rep target
+    } else {
+        placeholder1 = data.time;
+        placeholder2 = data.dist;
+    }
   }
 
-  $("#modal").classList.remove("hidden");
-}
-
-function closeModal(){
-  MODAL_EX_ID = null;
-  MODAL_LAST = null;
-  MODAL_SUGGESTED_WEIGHT = "";
-  $("#modal").classList.add("hidden");
-}
-
-function addSetRow(w, r){
-  const ex = DB.exercises[MODAL_EX_ID] || { repMin:8 };
-  const suggestedW = (w !== undefined) ? w : (typeof MODAL_SUGGESTED_WEIGHT === "number" ? MODAL_SUGGESTED_WEIGHT : "");
-  const suggestedR = (r !== undefined) ? r : ex.repMin;
-
-  const wrap = document.createElement("div");
-  wrap.className = "setrow";
-  wrap.innerHTML = `
-    <input class="setW" inputmode="decimal" placeholder="kg" value="${suggestedW ?? ""}">
-    <input class="setR" inputmode="numeric" placeholder="reps" value="${suggestedR ?? ""}">
-    <button class="smallbtn btnDel">✕</button>
+  const valueStr1 = isGhost ? `placeholder="${placeholder1}"` : `value="${val1}"`;
+  const valueStr2 = isGhost ? `placeholder="${placeholder2}"` : `value="${val2}"`;
+  const ghostClass = isGhost ? 'ghost-val' : '';
+  
+  row.innerHTML = `
+    <div class="text-center font-bold index-num">#</div>
+    <input ${val1Attrs} ${valueStr1} class="neo-input ${ghostClass}">
+    <input class="neo-input input-val-2 ${ghostClass}" type="number" ${valueStr2}>
+    <button class="btn-ghost text-red remove-row">✕</button>
   `;
-  wrap.querySelector(".btnDel").addEventListener("click", ()=>wrap.remove());
-  $("#setsContainer").appendChild(wrap);
+  
+  // Remove ghost class on input
+  row.querySelectorAll("input").forEach(inp => {
+      inp.addEventListener("input", () => inp.classList.remove("ghost-val"));
+  });
+  
+  row.querySelector(".remove-row").addEventListener("click", () => row.remove());
+  $("#logRows").appendChild(row);
+  renumberRows();
 }
 
-function copyLastToModal(){
-  if (!MODAL_LAST || !MODAL_LAST.sets) return alert("No last session to copy.");
-  $("#setsContainer").innerHTML = "";
-  MODAL_LAST.sets.forEach(s => addSetRow(s.w, s.r));
+function renumberRows() {
+  $$("#logRows .index-num").forEach((el, i) => el.textContent = i + 1);
 }
 
-function addThreeSets(){
-  const ex = DB.exercises[MODAL_EX_ID] || { repMin:8 };
-  addSetRow(undefined, ex.repMin);
-  addSetRow(undefined, ex.repMin);
-  addSetRow(undefined, ex.repMin);
-}
+$("#btnAddRow").addEventListener("click", () => {
+    addLogRow(DB.exercises[CURRENT_LOG_EX]);
+});
 
-function saveModalSets(){
-  if (!ACTIVE_SESSION || !MODAL_EX_ID) return;
+$("#btnSaveLog").addEventListener("click", () => {
+  const ex = DB.exercises[CURRENT_LOG_EX];
+  const rows = $$(".log-row");
+  const entries = [];
+  
+  rows.forEach(r => {
+    const v1 = r.querySelector(".input-val-1").value || r.querySelector(".input-val-1").getAttribute("placeholder");
+    const v2 = r.querySelector(".input-val-2").value || r.querySelector(".input-val-2").getAttribute("placeholder");
+    
+    if (v1 === "" && v2 === "") return;
+    
+    if (ex.type === 'cardio') {
+      entries.push({ time: v1, dist: v2 });
+    } else {
+      entries.push({ w: v1, r: v2 });
+    }
+  });
+  
+  ACTIVE_SESSION.entries[CURRENT_LOG_EX] = entries;
+  $("#logModal").classList.add("hidden");
+  renderActiveSession();
+});
 
-  // planned sets update
-  const ps = parseInt($("#plannedSets").value, 10);
-  const plannedSets = (Number.isNaN(ps) || ps < 0) ? 0 : ps;
-  $("#plannedSets").value = String(plannedSets);
-  updateActivePlannedSets(MODAL_EX_ID, plannedSets);
+$("#logModalClose").addEventListener("click", () => $("#logModal").classList.add("hidden"));
 
-  // read sets
-  const rows = Array.from(document.querySelectorAll("#setsContainer .setrow"));
-  const sets = rows.map(row=>{
-    const w = parseFloat(row.querySelector(".setW").value);
-    const r = parseInt(row.querySelector(".setR").value,10);
-    if (Number.isNaN(w) || Number.isNaN(r)) return null;
-    return { w, r };
-  }).filter(Boolean);
-
-  // allow empty sets (your request)
-  ACTIVE_SESSION.entries[MODAL_EX_ID] = sets;
-
-  renderTodayWorkout();
-  closeModal();
-}
-
-/***************
- * History + helper lookups
- ***************/
-function findLastExerciseEntry(exId){
-  for (const sess of DB.sessions){
-    const sets = (sess.entries && sess.entries[exId]) ? sess.entries[exId] : null;
-    if (sets && sets.length) return { date: sess.date, sets };
+// Helper: Find last session
+function findLastSessionWithExercise(exId) {
+  for (const sess of DB.sessions) {
+    if (sess.entries && sess.entries[exId] && sess.entries[exId].length > 0) {
+      return { date: sess.start, sets: sess.entries[exId] };
+    }
   }
   return null;
 }
 
-function roundToIncrement(val, inc){
-  if (!inc || inc <= 0) return val;
-  return Math.round(val / inc) * inc;
+// --- TEMPLATES ---
+$("#btnSaveTemplate").addEventListener("click", () => {
+    const name = prompt("Name this template:");
+    if(!name) return;
+    const tId = uid();
+    const exercises = ACTIVE_SESSION.order.map(id => ({ exId: id }));
+    DB.templates[tId] = { id: tId, name, exercises };
+    saveDB();
+    alert("Template saved.");
+});
+
+function renderTemplates() {
+    const sel = $("#templateSelect");
+    const list = $("#templateList");
+    sel.innerHTML = '<option value="">Select Template...</option>';
+    list.innerHTML = "";
+    
+    Object.values(DB.templates).forEach(t => {
+        sel.innerHTML += `<option value="${t.id}">${t.name}</option>`;
+        
+        const li = document.createElement("li");
+        li.innerHTML = `
+            <span>${t.name} (${t.exercises.length} ex)</span>
+            <button class="btn-ghost small text-red" onclick="deleteTemplate('${t.id}')">DEL</button>
+        `;
+        list.appendChild(li);
+    });
 }
 
-function computeSuggestion(exId, last){
-  const ex = DB.exercises[exId] || { repMin:8, repMax:12, incKg:2.5, equip:"other" };
-
-  if (!last){
-    const w = ex.equip === "bodyweight" ? 0 : "";
-    return {
-      weight: w,
-      weightText: w === "" ? "Pick a weight" : `${w} kg`,
-      explain: `Target ${ex.repMin}–${ex.repMax} reps. Add reps first, then weight when you hit the top.`
-    };
-  }
-
-  // best set = highest reps; if tie, heavier
-  const best = last.sets.reduce((a,b)=>{
-    if (b.r > a.r) return b;
-    if (b.r === a.r && b.w > a.w) return b;
-    return a;
-  }, last.sets[0]);
-
-  let nextW = best.w;
-  let explain = `Last best set: ${best.w} kg × ${best.r}. Target ${ex.repMin}–${ex.repMax}.`;
-
-  if (best.r >= ex.repMax){
-    nextW = roundToIncrement(best.w + ex.incKg, ex.incKg);
-    explain += ` You hit the top of the range — go up by ${ex.incKg} kg.`;
-  } else if (best.r < ex.repMin){
-    nextW = roundToIncrement(best.w - ex.incKg, ex.incKg);
-    explain += ` Below the range — drop by ${ex.incKg} kg.`;
-  } else {
-    explain += ` Stay at the same weight and try to add reps.`;
-  }
-
-  return {
-    weight: nextW,
-    weightText: `${nextW} kg`,
-    explain
-  };
+function deleteTemplate(id) {
+    if(!confirm("Delete template?")) return;
+    delete DB.templates[id];
+    saveDB();
+    renderTemplates();
 }
 
-function renderHistory(){
-  const wrap = $("#historyList");
-  if (DB.sessions.length === 0){
-    wrap.innerHTML = `<div class="card mutedbox"><strong>No workouts saved yet.</strong><div class="muted">Start one from Today.</div></div>`;
-    return;
-  }
-  wrap.innerHTML = DB.sessions.slice(0,30).map(sess=>{
-    const exCount = (sess.order || []).length;
-    const setCount = Object.values(sess.entries || {}).reduce((n,arr)=>n + (arr?.length||0), 0);
-    return `
-      <div class="card">
-        <div class="row">
-          <div>
-            <div><strong>${prettyDate(sess.date)}</strong> <span class="pill">${escapeHtml(sess.day || "")}</span></div>
-            <div class="muted">${exCount} exercises • ${setCount} sets</div>
-          </div>
-        </div>
-      </div>
+// --- HISTORY & STATS ---
+function renderHistory() {
+  const cont = $("#historyLog");
+  cont.innerHTML = "";
+  
+  DB.sessions.forEach(sess => {
+    const div = document.createElement("div");
+    div.className = "history-entry";
+    
+    const date = new Date(sess.start).toDateString();
+    
+    let details = "";
+    (sess.order || []).forEach(exId => {
+       const sets = sess.entries[exId];
+       if(!sets) return;
+       const exName = DB.exercises[exId]?.name || "Unknown";
+       let badges = sets.map(s => {
+           if(s.w) return `<span class="set-tag">${s.w}kg × ${s.r}</span>`;
+           if(s.time) return `<span class="set-tag">${s.time}m / ${s.dist}km</span>`;
+           return "";
+       }).join("");
+       details += `<div class="history-detail"><strong>${exName}</strong><br>${badges}</div>`;
+    });
+    
+    div.innerHTML = `
+      <div class="history-date">${date}</div>
+      <div class="muted small">${(sess.order||[]).length} Exercises</div>
+      ${details}
     `;
-  }).join("");
+    cont.appendChild(div);
+  });
 }
 
-/***************
- * Export / Import
- ***************/
-$("#btnExport").addEventListener("click", ()=>{
-  const blob = new Blob([JSON.stringify(DB, null, 2)], { type:"application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `liftlog-backup-${todayISO()}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-});
-
-$("#fileImport").addEventListener("change", async (e)=>{
-  const file = e.target.files?.[0];
-  if (!file) return;
-  const text = await file.text();
-  const next = JSON.parse(text);
-
-  if (!next || typeof next !== "object" || !next.exercises || !next.routine || !next.sessions){
-    return alert("That doesn't look like a LiftLog backup file.");
-  }
-
-  DB = migrateDB(next);
-  saveDB(DB);
-  alert("Imported.");
-  renderAll();
-  e.target.value = "";
-});
-
-/***************
- * Wire up day select changes
- ***************/
-$("#todayDay").addEventListener("change", ()=>renderAll());
-$("#routineDay").addEventListener("change", ()=>renderAll());
-
-/***************
- * Render all
- ***************/
-function renderAll(){
-  renderToday();
-  renderTodayWorkout();
-  renderRoutine();
-  renderExerciseTable();
-  renderHistory();
+// --- STATS CHART (Canvas) ---
+function simpleLineChart(ctx, labels, dataPoints, color) {
+  // Reset
+  ctx.canvas.width = ctx.canvas.offsetWidth;
+  ctx.canvas.height = ctx.canvas.offsetHeight;
+  const w = ctx.canvas.width;
+  const h = ctx.canvas.height;
+  const padding = 20;
+  
+  if (dataPoints.length === 0) return;
+  
+  const maxVal = Math.max(...dataPoints) * 1.1;
+  const minVal = Math.min(...dataPoints) * 0.9;
+  
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  
+  dataPoints.forEach((val, i) => {
+    const x = padding + (i / (dataPoints.length - 1)) * (w - padding * 2);
+    const y = h - padding - ((val - minVal) / (maxVal - minVal)) * (h - padding * 2);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+    
+    // Dot
+    ctx.fillStyle = color;
+    ctx.fillRect(x-3, y-3, 6, 6);
+  });
+  
+  ctx.stroke();
 }
 
-renderAll();
+function renderStats() {
+    // Populate select
+    const sel = $("#statExSelect");
+    if(sel.options.length === 0) {
+        Object.values(DB.exercises).forEach(ex => {
+            const opt = document.createElement("option");
+            opt.value = ex.id; opt.textContent = ex.name;
+            sel.appendChild(opt);
+        });
+        sel.addEventListener("change", updateStatsChart);
+    }
+    updateStatsChart();
+}
+
+function updateStatsChart() {
+    const exId = $("#statExSelect").value;
+    if(!exId) return;
+    
+    // Extract history
+    const history = [];
+    DB.sessions.slice().reverse().forEach(s => {
+        if(s.entries && s.entries[exId]) {
+            // Calculate 1RM estimate or max volume
+            const bestSet = s.entries[exId].reduce((prev, curr) => {
+                const w = parseFloat(curr.w || 0);
+                return w > prev ? w : prev;
+            }, 0);
+            if(bestSet > 0) history.push({ date: s.start, val: bestSet });
+        }
+    });
+    
+    const ctx = $("#progChart").getContext("2d");
+    if(history.length < 2) {
+        // clear
+        ctx.clearRect(0,0,300,150);
+        return;
+    }
+    
+    simpleLineChart(ctx, history.map((_,i)=>i), history.map(h=>h.val), "#000");
+}
+
+// --- EXPORT / IMPORT ---
+$("#btnExportCSV").addEventListener("click", () => {
+    let csv = "Date,Exercise,Set,Weight/Time,Reps/Dist\n";
+    DB.sessions.forEach(s => {
+        const date = s.start.split("T")[0];
+        (s.order || []).forEach(exId => {
+            const exName = DB.exercises[exId]?.name || "Unknown";
+            (s.entries[exId] || []).forEach((set, i) => {
+                const v1 = set.w || set.time;
+                const v2 = set.r || set.dist;
+                csv += `${date},${exName},${i+1},${v1},${v2}\n`;
+            });
+        });
+    });
+    
+    const blob = new Blob([csv], {type: "text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "liftlog_export.csv";
+    a.click();
+});
+
+// --- PICKER UTILS ---
+let _pickerCallback = null;
+function openExercisePicker(cb) {
+    _pickerCallback = cb;
+    $("#pickerModal").classList.remove("hidden");
+    renderPickerList();
+}
+
+$("#pickerSearch").addEventListener("input", renderPickerList);
+
+function renderPickerList() {
+    const q = $("#pickerSearch").value.toLowerCase();
+    const div = $("#pickerList");
+    div.innerHTML = "";
+    Object.values(DB.exercises).forEach(ex => {
+        if(!ex.name.toLowerCase().includes(q)) return;
+        const btn = document.createElement("div");
+        btn.className = "picker-item";
+        btn.textContent = ex.name;
+        btn.onclick = () => {
+            if(_pickerCallback) _pickerCallback(ex.id);
+            $("#pickerModal").classList.add("hidden");
+        };
+        div.appendChild(btn);
+    });
+}
+
+$("#pickerClose").addEventListener("click", () => $("#pickerModal").classList.add("hidden"));
+
+// Theme Toggle
+$("#btnTheme").addEventListener("click", () => {
+   DB.user.theme = DB.user.theme === "light" ? "dark" : "light";
+   document.body.className = `theme-${DB.user.theme}`;
+   saveDB();
+});
+
+// Initialization
+populateSelects();
+renderCurrentTab("dashboard");
