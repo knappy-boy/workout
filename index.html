@@ -2,171 +2,206 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#0b0b0b" />
-  <title>LiftLog (Offline)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#FF2A2A" />
+  <title>LIFTLOG ULTRA</title>
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="theme-light">
   <header>
-    <div class="title">
-      <h1>LiftLog</h1>
-      <div class="sub">Offline workout log</div>
+    <div class="brand">
+      <h1>LIFT<span class="outline">LOG</span></h1>
     </div>
-    <div class="top-actions">
-      <button id="btnExport" class="ghost">Export</button>
-      <label class="ghost file">
-        Import
-        <input id="fileImport" type="file" accept="application/json" />
-      </label>
+    <div class="controls">
+      <button id="btnTheme" class="icon-btn" aria-label="Toggle Theme">◑</button>
+      <button id="btnSettings" class="icon-btn" aria-label="Settings">⚙</button>
     </div>
   </header>
 
-  <nav class="tabs">
-    <button class="tab active" data-tab="today">Today</button>
-    <button class="tab" data-tab="routine">Routine</button>
-    <button class="tab" data-tab="exercises">Exercises</button>
-    <button class="tab" data-tab="history">History</button>
+  <nav class="tabs-scroll">
+    <div class="tabs">
+      <button class="tab active" data-tab="dashboard">DASHBOARD</button>
+      <button class="tab" data-tab="workout">WORKOUT</button>
+      <button class="tab" data-tab="exercises">EXERCISES</button>
+      <button class="tab" data-tab="history">HISTORY</button>
+      <button class="tab" data-tab="stats">STATS</button>
+    </div>
   </nav>
 
   <main>
-    <!-- TODAY -->
-    <section id="tab-today" class="panel active">
-      <div class="row">
-        <div>
-          <h2 id="todayTitle">Today</h2>
-          <div class="muted" id="todayHint"></div>
+    <section id="tab-dashboard" class="panel active">
+      <div class="neo-card bg-white">
+        <h2>BODYWEIGHT</h2>
+        <div class="chart-container">
+          <canvas id="bwChart"></canvas>
         </div>
-        <div class="row gap">
-          <select id="todayDay"></select>
-          <button id="btnStart" class="primary">Start Workout</button>
-        </div>
-      </div>
-
-      <div id="todayWorkout" class="card hidden"></div>
-      <div id="todayEmpty" class="card mutedbox"></div>
-    </section>
-
-    <!-- ROUTINE -->
-    <section id="tab-routine" class="panel">
-      <div class="row">
-        <h2>Weekly routine</h2>
-        <div class="row gap">
-          <select id="routineDay"></select>
-          <button id="btnAddToDay" class="primary">Add exercise</button>
+        <div class="row mt-2">
+          <input id="bwInput" type="number" step="0.1" placeholder="Current kg">
+          <button id="btnLogBW" class="btn-black">LOG</button>
         </div>
       </div>
 
-      <div class="card">
-        <div class="muted">Drag to reorder. Set “planned sets” per exercise. Tap 🗑️ to remove from the day.</div>
-        <ul id="routineList" class="list"></ul>
+      <div class="neo-card bg-yellow mt-4">
+        <h2>CALENDAR</h2>
+        <div id="calendarGrid" class="calendar-grid"></div>
       </div>
     </section>
 
-    <!-- EXERCISES -->
-    <section id="tab-exercises" class="panel">
-      <div class="row">
-        <h2>Exercises</h2>
+    <section id="tab-workout" class="panel">
+      <div id="activeWorkoutPanel" class="hidden">
+        <div class="neo-card bg-red text-white mb-4">
+          <div class="row">
+            <h2 id="workoutTimer">00:00</h2>
+            <button id="btnFinishWorkout" class="btn-white">FINISH</button>
+          </div>
+          <div class="muted-white" id="workoutMeta"></div>
+        </div>
+
+        <div class="row mb-2">
+           <button id="btnAddExToWorkout" class="btn-black full">+ EXERCISE</button>
+           <button id="btnSaveTemplate" class="btn-black icon-btn">💾</button>
+        </div>
+
+        <div id="activeExerciseList" class="stack-list"></div>
       </div>
 
-      <div class="card">
-        <h3>Add exercise</h3>
-        <div class="grid">
-          <label>Name
-            <input id="exName" placeholder="e.g., Bench Press" />
-          </label>
-          <label>Equipment
-            <select id="exEquip">
-              <option value="barbell">Barbell</option>
-              <option value="dumbbell">Dumbbell</option>
-              <option value="machine">Machine</option>
-              <option value="cable">Cable</option>
-              <option value="bodyweight">Bodyweight</option>
-              <option value="other">Other</option>
+      <div id="startWorkoutPanel">
+        <div class="neo-card bg-white">
+          <h2>START WORKOUT</h2>
+          <div class="row gap-2 mt-2">
+            <select id="templateSelect" class="neo-select full">
+              <option value="">(Select Template)</option>
             </select>
-          </label>
-          <label>Rep min
-            <input id="exRepMin" type="number" min="1" value="8" />
-          </label>
-          <label>Rep max
-            <input id="exRepMax" type="number" min="1" value="12" />
-          </label>
-          <label>Weight increment (kg)
-            <input id="exInc" type="number" step="0.5" min="0" value="2.5" />
-          </label>
+          </div>
+          <div class="row gap-2 mt-2">
+            <button id="btnStartEmpty" class="btn-black full">FREESTYLE</button>
+            <button id="btnStartTemplate" class="btn-red full">START</button>
+          </div>
         </div>
-        <button id="btnAddExercise" class="primary">Add</button>
-      </div>
 
-      <div class="card">
-        <h3>Your exercise library</h3>
-        <div id="exerciseTable"></div>
+        <div class="neo-card bg-white mt-4">
+          <div class="row">
+             <h3>MY TEMPLATES</h3>
+             <button id="btnNewTemplate" class="btn-small">NEW</button>
+          </div>
+          <ul id="templateList" class="simple-list mt-2"></ul>
+        </div>
       </div>
     </section>
 
-    <!-- HISTORY -->
-    <section id="tab-history" class="panel">
-      <div class="row">
-        <h2>History</h2>
-      </div>
-      <div id="historyList"></div>
-    </section>
-
-    <!-- MODAL -->
-    <div id="modal" class="modal hidden">
-      <div class="modal-inner">
+    <section id="tab-exercises" class="panel">
+      <div class="neo-card bg-white">
         <div class="row">
-          <h3 id="modalTitle">Log</h3>
-          <button id="btnCloseModal" class="ghost">Close</button>
+            <h2>LIBRARY</h2>
+            <button id="btnShowAddEx" class="btn-black small">+ NEW</button>
+        </div>
+        
+        <div class="filter-bar mt-2">
+             <select id="filterMuscle" class="neo-select"></select>
+             <input id="searchEx" class="neo-input" placeholder="Search...">
         </div>
 
-        <div id="lastTime" class="card mutedbox"></div>
-
-        <div id="suggestion" class="card"></div>
-
-        <div class="card">
-          <div class="row">
-            <div>
-              <div><strong>Plan</strong></div>
-              <div class="muted">Optional — planned working sets for this exercise today.</div>
-            </div>
-          </div>
-          <div class="grid">
-            <label>Planned sets
-              <input id="plannedSets" type="number" min="0" value="0" />
-            </label>
-            <label>&nbsp;
-              <div class="muted">Tip: you can change this mid-workout.</div>
-            </label>
-          </div>
-          <div class="row gap">
-            <button id="btnCopyLast" class="ghost">Copy last time</button>
-            <button id="btnAdd3" class="ghost">Add 3 sets</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="row">
-            <h4>Sets</h4>
-            <button id="btnAddSet" class="ghost">+ Set</button>
-          </div>
-          <div class="muted">Add sets only when you want — you’re not forced to log anything.</div>
-          <div id="setsContainer"></div>
-          <div class="row right">
-            <button id="btnSaveSets" class="primary">Save</button>
-          </div>
-        </div>
+        <div id="exerciseList" class="exercise-grid mt-2"></div>
       </div>
-    </div>
+
+      <dialog id="addExModal" class="neo-modal">
+        <div class="modal-content">
+          <h3>NEW EXERCISE</h3>
+          <label>Name <input id="newExName" class="neo-input"></label>
+          <div class="row gap-2">
+            <label>Type 
+                <select id="newExType" class="neo-select">
+                    <option value="strength">Strength</option>
+                    <option value="cardio">Cardio</option>
+                </select>
+            </label>
+            <label>Muscle
+                <select id="newExMuscle" class="neo-select"></select>
+            </label>
+          </div>
+          <div id="strengthOptions" class="grid-2">
+             <label>Equip <select id="newExEquip" class="neo-select"></select></label>
+             <label>Increment <input id="newExInc" type="number" value="2.5" class="neo-input"></label>
+          </div>
+          <div class="row mt-4">
+            <button id="btnCloseExModal" class="btn-ghost">CANCEL</button>
+            <button id="btnSaveEx" class="btn-red">SAVE</button>
+          </div>
+        </div>
+      </dialog>
+    </section>
+
+    <section id="tab-history" class="panel">
+      <div class="neo-card bg-white">
+        <h2>LOGS</h2>
+        <div id="historyLog" class="history-stream"></div>
+      </div>
+    </section>
+
+    <section id="tab-stats" class="panel">
+      <div class="neo-card bg-white">
+        <h2>PROGRESS</h2>
+        <select id="statExSelect" class="neo-select full mb-2"></select>
+        <div class="chart-container large">
+          <canvas id="progChart"></canvas>
+        </div>
+        <div id="statRecords" class="records-grid mt-2"></div>
+      </div>
+       <div class="neo-card bg-black text-white mt-4">
+        <h2>DATA</h2>
+        <button id="btnExportCSV" class="btn-white full mt-2">EXPORT CSV</button>
+        <button id="btnExportJSON" class="btn-white full mt-2">BACKUP (JSON)</button>
+        <label class="btn-white full mt-2 text-center block">
+           RESTORE (JSON) <input type="file" id="fileRestore" hidden>
+        </label>
+      </div>
+    </section>
 
   </main>
 
+  <div id="logModal" class="overlay hidden">
+    <div class="drawer">
+      <div class="drawer-handle"></div>
+      <div class="drawer-header">
+        <h2 id="logModalTitle">Bench Press</h2>
+        <button id="logModalClose" class="btn-ghost">✕</button>
+      </div>
+      
+      <div class="drawer-body">
+        <div id="prevSessionInfo" class="info-box mb-2"></div>
+        
+        <div class="log-headers" id="logHeaders">
+            <span>SET</span>
+            <span class="h-val-1">KG</span>
+            <span class="h-val-2">REPS</span>
+            <span></span>
+        </div>
+        <div id="logRows" class="log-rows"></div>
+        
+        <div class="row mt-2 gap-2">
+             <button id="btnAddRow" class="btn-black full">+ SET</button>
+             <button id="btnSaveLog" class="btn-red full">SAVE</button>
+        </div>
+        <div class="row mt-2">
+             <textarea id="logNotes" class="neo-input full" placeholder="Notes..."></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="pickerModal" class="overlay hidden">
+     <div class="picker-box">
+         <h3>SELECT EXERCISE</h3>
+         <input id="pickerSearch" class="neo-input full mb-2" placeholder="Filter...">
+         <div id="pickerList" class="picker-list"></div>
+         <button id="pickerClose" class="btn-black full mt-2">CANCEL</button>
+     </div>
+  </div>
+
   <script src="app.js"></script>
   <script>
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("./sw.js");
-    }
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js");
   </script>
 </body>
 </html>
