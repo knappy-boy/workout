@@ -39,19 +39,37 @@
       </div>
 
       <div class="neo-card bg-yellow mt-4">
-        <h2>CALENDAR</h2>
+        <div class="row">
+          <button id="btnPrevMonth" class="btn-ghost">◀</button>
+          <h2 id="calendarMonth">JANUARY 2026</h2>
+          <button id="btnNextMonth" class="btn-ghost">▶</button>
+        </div>
+        <div class="calendar-weekdays">
+          <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+        </div>
         <div id="calendarGrid" class="calendar-grid"></div>
       </div>
+
+      <dialog id="dayModal" class="neo-modal">
+        <div class="modal-content">
+          <h3 id="dayModalTitle">January 29</h3>
+          <div id="dayModalContent"></div>
+          <button id="btnCloseDayModal" class="btn-black full mt-4">CLOSE</button>
+        </div>
+      </dialog>
     </section>
 
     <section id="tab-workout" class="panel">
       <div id="activeWorkoutPanel" class="hidden">
         <div class="neo-card bg-red text-white mb-4">
           <div class="row">
-            <h2 id="workoutTimer">00:00</h2>
+            <button id="btnToggleTimer" class="btn-ghost text-white timer-toggle">▼</button>
             <button id="btnFinishWorkout" class="btn-white">FINISH</button>
           </div>
-          <div class="muted-white" id="workoutMeta"></div>
+          <div id="timerCollapsible" class="timer-collapsed">
+            <h2 id="workoutTimer">00:00</h2>
+            <div class="muted-white" id="workoutMeta"></div>
+          </div>
         </div>
 
         <div class="row mb-2">
@@ -116,9 +134,22 @@
                 <select id="newExMuscle" class="neo-select"></select>
             </label>
           </div>
-          <div id="strengthOptions" class="grid-2">
-             <label>Equip <select id="newExEquip" class="neo-select"></select></label>
-             <label>Increment <input id="newExInc" type="number" value="2.5" class="neo-input"></label>
+          <div id="strengthOptions">
+            <div class="grid-2">
+              <label>Equip <select id="newExEquip" class="neo-select"></select></label>
+              <label>Increment <input id="newExInc" type="number" value="2.5" class="neo-input"></label>
+            </div>
+            <label class="checkbox-label mt-2">
+              <input type="checkbox" id="newExAssisted">
+              Assisted exercise (e.g. pull-up with band)
+            </label>
+            <p class="muted small">For assisted exercises, you'll log the assistance weight and we'll calculate effective weight</p>
+          </div>
+          <div id="cardioOptions" class="hidden mt-2">
+             <label>Secondary metric name
+               <input id="newExCardioMetric" class="neo-input" placeholder="e.g. floors, km, laps">
+             </label>
+             <p class="muted small">Leave blank for default (km)</p>
           </div>
           <div class="row mt-4">
             <button id="btnCloseExModal" class="btn-ghost">CANCEL</button>

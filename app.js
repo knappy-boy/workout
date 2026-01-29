@@ -250,29 +250,124 @@ function drawBodyweightChart() {
   });
 }
 
+// Calendar state
+let calendarDate = new Date();
+
+// Muscle group colors for calendar dots
+const MUSCLE_COLORS = {
+  Chest: "#E57373", Back: "#64B5F6", Shoulders: "#FFB74D",
+  Biceps: "#BA68C8", Triceps: "#F06292", Quads: "#81C784",
+  Hamstrings: "#4DB6AC", Glutes: "#4DD0E1", Core: "#90A4AE",
+  Cardio: "#FFD54F", Other: "#78909C"
+};
+
 function renderCalendar() {
   const grid = $("#calendarGrid");
   grid.innerHTML = "";
-  
-  // Last 28 days
+
+  const year = calendarDate.getFullYear();
+  const month = calendarDate.getMonth();
+
+  // Update header
+  const monthNames = ["January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"];
+  $("#calendarMonth").textContent = `${monthNames[month].toUpperCase()} ${year}`;
+
+  // First day of month and total days
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
   const today = new Date();
-  for (let i = 27; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(today.getDate() - i);
-    const iso = d.toISOString().split("T")[0];
-    
+  const todayStr = today.toISOString().split("T")[0];
+
+  // Empty cells for days before month starts
+  for (let i = 0; i < firstDay; i++) {
+    const empty = document.createElement("div");
+    empty.className = "cal-day empty";
+    grid.appendChild(empty);
+  }
+
+  // Days of the month
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(year, month, day);
+    const iso = date.toISOString().split("T")[0];
+
     const div = document.createElement("div");
     div.className = "cal-day";
-    div.textContent = d.getDate();
-    if (i === 0) div.classList.add("today");
-    
-    // Check if workout existed
-    const hasWorkout = DB.sessions.some(s => s.start.startsWith(iso));
-    if (hasWorkout) div.classList.add("active");
-    
+
+    // Check if today
+    if (iso === todayStr) div.classList.add("today");
+
+    // Find workouts on this day
+    const dayWorkouts = DB.sessions.filter(s => s.start.startsWith(iso));
+
+    if (dayWorkouts.length > 0) {
+      div.classList.add("has-workout");
+
+      // Get unique muscle groups worked
+      const muscles = new Set();
+      dayWorkouts.forEach(sess => {
+        (sess.order || []).forEach(exId => {
+          const ex = DB.exercises[exId];
+          if (ex && ex.muscle) muscles.add(ex.muscle);
+        });
+      });
+
+      // Create dots container
+      const dotsHtml = [...muscles].slice(0, 4).map(m =>
+        `<span class="cal-dot" style="background:${MUSCLE_COLORS[m] || '#999'}"></span>`
+      ).join("");
+
+      div.innerHTML = `<span class="cal-day-num">${day}</span><div class="cal-dots">${dotsHtml}</div>`;
+
+      // Click to view details
+      div.onclick = () => showDayDetails(iso, dayWorkouts);
+    } else {
+      div.innerHTML = `<span class="cal-day-num">${day}</span>`;
+    }
+
     grid.appendChild(div);
   }
 }
+
+function showDayDetails(iso, workouts) {
+  const date = new Date(iso);
+  const dateStr = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  $("#dayModalTitle").textContent = dateStr;
+
+  let html = "";
+  workouts.forEach(sess => {
+    (sess.order || []).forEach(exId => {
+      const ex = DB.exercises[exId];
+      const sets = sess.entries[exId];
+      if (!ex || !sets || sets.length === 0) return;
+
+      const setsHtml = sets.map(s => {
+        if (s.w) return `<span class="set-tag">${s.w}kg × ${s.r}</span>`;
+        if (s.time) return `<span class="set-tag">${s.time}m / ${s.dist}km</span>`;
+        return "";
+      }).join("");
+
+      html += `<div class="day-exercise"><strong>${ex.name}</strong><br>${setsHtml}</div>`;
+    });
+  });
+
+  if (!html) html = '<p class="muted">No exercises recorded</p>';
+  $("#dayModalContent").innerHTML = html;
+  $("#dayModal").showModal();
+}
+
+$("#btnCloseDayModal").addEventListener("click", () => $("#dayModal").close());
+
+$("#btnPrevMonth").addEventListener("click", () => {
+  calendarDate.setMonth(calendarDate.getMonth() - 1);
+  renderCalendar();
+});
+
+$("#btnNextMonth").addEventListener("click", () => {
+  calendarDate.setMonth(calendarDate.getMonth() + 1);
+  renderCalendar();
+});
 
 // --- EXERCISES ---
 const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Core", "Cardio", "Other"];
@@ -395,7 +490,10 @@ $("#btnShowAddEx").addEventListener("click", () => {
   $("#newExMuscle").value = MUSCLE_GROUPS[0];
   $("#newExEquip").value = "barbell";
   $("#newExInc").value = "2.5";
+  $("#newExCardioMetric").value = "";
+  $("#newExAssisted").checked = false;
   $("#strengthOptions").classList.remove("hidden");
+  $("#cardioOptions").classList.add("hidden");
   $("#addExModal").showModal();
 });
 
@@ -405,8 +503,13 @@ $("#btnCloseExModal").addEventListener("click", () => {
 });
 
 $("#newExType").addEventListener("change", (e) => {
-   if(e.target.value === 'cardio') $("#strengthOptions").classList.add("hidden");
-   else $("#strengthOptions").classList.remove("hidden");
+   if(e.target.value === 'cardio') {
+     $("#strengthOptions").classList.add("hidden");
+     $("#cardioOptions").classList.remove("hidden");
+   } else {
+     $("#strengthOptions").classList.remove("hidden");
+     $("#cardioOptions").classList.add("hidden");
+   }
 });
 
 let EDITING_EXERCISE_ID = null;
@@ -420,8 +523,10 @@ $("#btnSaveEx").addEventListener("click", () => {
     name,
     type,
     muscle: $("#newExMuscle").value,
-    equip: $("#newExEquip").value,
-    increment: parseFloat($("#newExInc").value) || 2.5
+    equip: type === 'cardio' ? null : $("#newExEquip").value,
+    increment: type === 'cardio' ? null : (parseFloat($("#newExInc").value) || 2.5),
+    cardioMetric: type === 'cardio' ? ($("#newExCardioMetric").value.trim() || 'km') : null,
+    isAssisted: type === 'strength' ? $("#newExAssisted").checked : false
   };
 
   if (EDITING_EXERCISE_ID) {
@@ -452,12 +557,16 @@ function editExercise(id) {
   $("#newExMuscle").value = ex.muscle || '';
   $("#newExEquip").value = ex.equip || 'barbell';
   $("#newExInc").value = ex.increment || 2.5;
+  $("#newExCardioMetric").value = ex.cardioMetric || '';
+  $("#newExAssisted").checked = ex.isAssisted || false;
 
-  // Show/hide strength options based on type
+  // Show/hide options based on type
   if (ex.type === 'cardio') {
     $("#strengthOptions").classList.add("hidden");
+    $("#cardioOptions").classList.remove("hidden");
   } else {
     $("#strengthOptions").classList.remove("hidden");
+    $("#cardioOptions").classList.add("hidden");
   }
 
   $("#addExModal").showModal();
@@ -584,36 +693,76 @@ function openLogger(exId) {
   CURRENT_LOG_EX = exId;
   const ex = DB.exercises[exId];
   $("#logModalTitle").textContent = ex.name;
-  
+
   // Headers based on type
   const headers = $("#logHeaders");
   if (ex.type === 'cardio') {
     headers.querySelector(".h-val-1").textContent = "MINS";
-    headers.querySelector(".h-val-2").textContent = "KM";
+    headers.querySelector(".h-val-2").textContent = (ex.cardioMetric || 'KM').toUpperCase();
+  } else if (ex.isAssisted) {
+    headers.querySelector(".h-val-1").textContent = "ASSIST";
+    headers.querySelector(".h-val-2").textContent = "REPS";
   } else {
     headers.querySelector(".h-val-1").textContent = "KG";
     headers.querySelector(".h-val-2").textContent = "REPS";
   }
-  
+
   const container = $("#logRows");
   container.innerHTML = "";
-  
+
   // Get existing logs OR Auto-fill from history
   const currentLogs = ACTIVE_SESSION.entries[exId] || [];
-  
+
   if (currentLogs.length === 0) {
     // Attempt Auto-fill
     const lastSession = findLastSessionWithExercise(exId);
-    if (lastSession) {
-      $("#prevSessionInfo").textContent = `Last time: ${new Date(lastSession.date).toLocaleDateString()} (${lastSession.sets.length} sets)`;
+    if (lastSession && ex.type !== 'cardio') {
+      // Calculate smart suggestion
+      const bestSet = lastSession.sets.reduce((best, s) => {
+        const w = parseFloat(s.w || 0);
+        const r = parseInt(s.r || 0);
+        if (w > best.w || (w === best.w && r > best.r)) return { w, r };
+        return best;
+      }, { w: 0, r: 0 });
+
+      const increment = ex.increment || 2.5;
+      const lowerWeight = bestSet.w;
+      const higherWeight = bestSet.w + increment;
+
+      // Suggestion: same weight = more reps, more weight = same/fewer reps
+      let suggestion = "";
+      if (bestSet.r >= 12) {
+        suggestion = `<strong>Try: ${higherWeight}kg for 8-10 reps</strong> (time to increase!)`;
+      } else if (bestSet.r >= 8) {
+        suggestion = `<strong>Try: ${lowerWeight}-${higherWeight}kg for ${bestSet.r}-${bestSet.r + 2} reps</strong>`;
+      } else {
+        suggestion = `<strong>Try: ${lowerWeight}kg for ${bestSet.r + 1}-${bestSet.r + 3} reps</strong> (build reps first)`;
+      }
+
+      const dateStr = new Date(lastSession.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      $("#prevSessionInfo").innerHTML = `
+        <div class="muted small">Last: ${dateStr} — Best set: ${bestSet.w}kg × ${bestSet.r}</div>
+        <div class="suggestion">${suggestion}</div>
+      `;
+
       // Add rows for each set done last time
       lastSession.sets.forEach(s => addLogRow(ex, s, true));
+    } else if (lastSession) {
+      // Cardio - just show last time
+      $("#prevSessionInfo").innerHTML = `<span class="muted small">Last: ${new Date(lastSession.date).toLocaleDateString()} (${lastSession.sets.length} sets)</span>`;
+      lastSession.sets.forEach(s => addLogRow(ex, s, true));
     } else {
-      $("#prevSessionInfo").textContent = "No history available.";
+      // Show assisted info if applicable
+      const bw = getLatestBodyweight();
+      if (ex.isAssisted && bw) {
+        $("#prevSessionInfo").innerHTML = `<span class="muted small">Your bodyweight: ${bw}kg. Log assistance and we'll calculate effective weight.</span>`;
+      } else {
+        $("#prevSessionInfo").innerHTML = '<span class="muted small">No history - this is your first time!</span>';
+      }
       addLogRow(ex);
     }
   } else {
-    $("#prevSessionInfo").textContent = "Editing current session.";
+    $("#prevSessionInfo").innerHTML = '<span class="muted small">Editing current session</span>';
     currentLogs.forEach(s => addLogRow(ex, s, false));
   }
   
@@ -783,6 +932,8 @@ function renderHistory() {
     return;
   }
 
+  const bw = getLatestBodyweight();
+
   DB.sessions.forEach((sess, idx) => {
     const div = document.createElement("div");
     div.className = "history-entry";
@@ -793,13 +944,23 @@ function renderHistory() {
     (sess.order || []).forEach(exId => {
        const sets = sess.entries[exId];
        if(!sets || sets.length === 0) return;
-       const exName = DB.exercises[exId]?.name || "Unknown";
+       const ex = DB.exercises[exId];
+       const exName = ex?.name || "Unknown";
        let badges = sets.map(s => {
-           if(s.w) return `<span class="set-tag">${s.w}kg × ${s.r}</span>`;
-           if(s.time) return `<span class="set-tag">${s.time}m / ${s.dist}km</span>`;
+           if(s.w) {
+             if (ex?.isAssisted && bw) {
+               const effective = bw - parseFloat(s.w);
+               return `<span class="set-tag">${effective}kg eff × ${s.r}</span>`;
+             }
+             return `<span class="set-tag">${s.w}kg × ${s.r}</span>`;
+           }
+           if(s.time) {
+             const metric = ex?.cardioMetric || 'km';
+             return `<span class="set-tag">${s.time}m / ${s.dist}${metric}</span>`;
+           }
            return "";
        }).join("");
-       details += `<div class="history-detail"><strong>${exName}</strong><br>${badges}</div>`;
+       details += `<div class="history-detail"><strong>${exName}</strong>${ex?.isAssisted ? ' <span class="muted small">(assisted)</span>' : ''}<br>${badges}</div>`;
     });
 
     div.innerHTML = `
@@ -1149,6 +1310,21 @@ $("#btnTheme").addEventListener("click", () => {
    DB.user.theme = DB.user.theme === "light" ? "dark" : "light";
    document.body.className = `theme-${DB.user.theme}`;
    saveDB();
+});
+
+// Timer Toggle
+$("#btnToggleTimer").addEventListener("click", () => {
+  const timer = $("#timerCollapsible");
+  const btn = $("#btnToggleTimer");
+  if (timer.classList.contains("timer-expanded")) {
+    timer.classList.remove("timer-expanded");
+    btn.classList.remove("expanded");
+    btn.textContent = "▼";
+  } else {
+    timer.classList.add("timer-expanded");
+    btn.classList.add("expanded");
+    btn.textContent = "▲";
+  }
 });
 
 // Settings Modal
