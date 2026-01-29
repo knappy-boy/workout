@@ -965,12 +965,26 @@ $("#btnNewTemplate").addEventListener("click", () => {
 });
 
 $("#btnAddExToTemplate").addEventListener("click", () => {
-  openExercisePicker((exId) => {
-    if (!_templateBuilderExercises.includes(exId)) {
-      _templateBuilderExercises.push(exId);
+  // Temporarily close the template builder so picker appears on top
+  $("#templateBuilderModal").close();
+
+  openExercisePicker(
+    // On select callback
+    (exId) => {
+      if (!_templateBuilderExercises.includes(exId)) {
+        _templateBuilderExercises.push(exId);
+      }
+      // Reopen template builder after selection
       renderTemplateBuilderList();
+      $("#templateBuilderModal").showModal();
+    },
+    // On cancel callback
+    () => {
+      // Reopen template builder if picker was cancelled
+      renderTemplateBuilderList();
+      $("#templateBuilderModal").showModal();
     }
-  });
+  );
 });
 
 function renderTemplateBuilderList() {
@@ -1431,10 +1445,12 @@ $("#fileRestore").addEventListener("change", (e) => {
 
 // --- PICKER UTILS ---
 let _pickerCallback = null;
+let _pickerCancelCallback = null;
 let _pickerFilter = "All";
 
-function openExercisePicker(cb) {
+function openExercisePicker(cb, cancelCb = null) {
     _pickerCallback = cb;
+    _pickerCancelCallback = cancelCb;
     _pickerFilter = "All";
     $("#pickerSearch").value = "";
     $("#pickerModal").classList.remove("hidden");
@@ -1517,7 +1533,13 @@ function renderPickerList() {
     });
 }
 
-$("#pickerClose").addEventListener("click", () => $("#pickerModal").classList.add("hidden"));
+$("#pickerClose").addEventListener("click", () => {
+  $("#pickerModal").classList.add("hidden");
+  if (_pickerCancelCallback) {
+    _pickerCancelCallback();
+    _pickerCancelCallback = null;
+  }
+});
 
 // Theme Toggle
 $("#btnTheme").addEventListener("click", () => {
