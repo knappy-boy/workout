@@ -31,15 +31,11 @@
 
   <main>
     <section id="tab-dashboard" class="panel active">
-      <div class="neo-card bg-white">
-        <h2>BODYWEIGHT</h2>
-        <div class="chart-container">
-          <canvas id="bwChart"></canvas>
-        </div>
-        <div class="row mt-2">
-          <input id="bwInput" type="number" step="0.1" placeholder="Current kg">
-          <button id="btnLogBW" class="btn-black">LOG</button>
-        </div>
+      <button id="btnQuickStart" class="btn-red full quick-start-btn">START WORKOUT</button>
+
+      <div class="neo-card bg-white mt-4">
+        <h2>RECENT WORKOUTS</h2>
+        <div id="recentLogs" class="recent-logs"></div>
       </div>
 
       <div class="neo-card bg-yellow mt-4">
@@ -141,7 +137,18 @@
 
     <section id="tab-stats" class="panel">
       <div class="neo-card bg-white">
-        <h2>PROGRESS</h2>
+        <h2>BODYWEIGHT</h2>
+        <div class="chart-container">
+          <canvas id="bwChart"></canvas>
+        </div>
+        <div class="row mt-2">
+          <input id="bwInput" type="number" step="0.1" inputmode="decimal" placeholder="Current kg">
+          <button id="btnLogBW" class="btn-black">LOG</button>
+        </div>
+      </div>
+
+      <div class="neo-card bg-white mt-4">
+        <h2>EXERCISE PROGRESS</h2>
         <select id="statExSelect" class="neo-select full mb-2"></select>
         <div class="chart-container large">
           <canvas id="progChart"></canvas>
@@ -193,7 +200,8 @@
   <div id="pickerModal" class="overlay hidden">
      <div class="picker-box">
          <h3>SELECT EXERCISE</h3>
-         <input id="pickerSearch" class="neo-input full mb-2" placeholder="Filter...">
+         <div id="pickerTabs" class="picker-tabs"></div>
+         <input id="pickerSearch" class="neo-input full mb-2" placeholder="Search...">
          <div id="pickerList" class="picker-list"></div>
          <button id="pickerClose" class="btn-black full mt-2">CANCEL</button>
      </div>

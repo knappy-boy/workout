@@ -153,6 +153,23 @@ canvas { width: 100%; height: 250px; }
 
 /* PICKER */
 .picker-box { background: var(--white); width: 90%; max-width: 500px; max-height: 80vh; margin-top: 10vh; border: var(--border); box-shadow: var(--shadow); padding: 20px; display: flex; flex-direction: column; }
+.picker-tabs { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+.picker-tab { padding: 5px 10px; border: 2px solid #ccc; background: transparent; font-size: 0.75rem; font-weight: 700; cursor: pointer; border-radius: 99px; }
+.picker-tab.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+.theme-dark .picker-tab { border-color: #555; color: #fff; }
+.theme-dark .picker-tab.active { background: #fff; color: #000; border-color: #fff; }
 .picker-list { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 5px; }
 .picker-item { padding: 12px; border: 2px solid #ccc; background: var(--gray); text-align: left; font-weight: bold; cursor: pointer; }
 .picker-item:hover { border-color: var(--black); background: var(--white); }
+
+/* QUICK START */
+.quick-start-btn { padding: 20px; font-size: 1.2rem; }
+
+/* RECENT LOGS */
+.recent-logs { display: flex; flex-direction: column; gap: 10px; }
+.recent-log-item { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 10px; border: 2px solid var(--black); background: var(--gray); }
+.recent-log-date { font-weight: 900; }
+.recent-log-info { text-align: right; font-weight: 600; }
+.recent-log-muscles { grid-column: 1 / -1; font-size: 0.85rem; color: #666; }
+.theme-dark .recent-log-muscles { color: #aaa; }
+.theme-dark .recent-log-item { background: #1e1e1e; border-color: #444; }

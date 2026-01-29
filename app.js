@@ -66,10 +66,49 @@ function renderCurrentTab(tab) {
 
 // --- DASHBOARD ---
 function renderDashboard() {
-  drawBodyweightChart();
+  renderRecentLogs();
   renderCalendar();
-  $("#bwInput").value = "";
 }
+
+function renderRecentLogs() {
+  const container = $("#recentLogs");
+  container.innerHTML = "";
+
+  const recentSessions = DB.sessions.slice(0, 3);
+
+  if (recentSessions.length === 0) {
+    container.innerHTML = '<p class="muted">No workouts yet. Start your first one!</p>';
+    return;
+  }
+
+  recentSessions.forEach(sess => {
+    const div = document.createElement("div");
+    div.className = "recent-log-item";
+
+    const date = new Date(sess.start);
+    const dateStr = date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    const exerciseCount = (sess.order || []).length;
+
+    // Get muscle groups worked
+    const muscles = new Set();
+    (sess.order || []).forEach(exId => {
+      const ex = DB.exercises[exId];
+      if (ex && ex.muscle) muscles.add(ex.muscle);
+    });
+
+    div.innerHTML = `
+      <div class="recent-log-date">${dateStr}</div>
+      <div class="recent-log-info">${exerciseCount} exercises</div>
+      <div class="recent-log-muscles">${[...muscles].slice(0, 3).join(', ') || 'No data'}</div>
+    `;
+    container.appendChild(div);
+  });
+}
+
+// Quick Start button
+$("#btnQuickStart").addEventListener("click", () => {
+  $(".tab[data-tab='workout']").click();
+});
 
 $("#btnLogBW").addEventListener("click", () => {
   const kg = parseFloat($("#bwInput").value);
@@ -147,20 +186,37 @@ function migrateExerciseCategories() {
 function renderExerciseLibrary() {
   const container = $("#exerciseList");
   container.innerHTML = "";
-  
+
   const filter = $("#filterMuscle").value;
   const search = $("#searchEx").value.toLowerCase();
-  
-  const list = Object.values(DB.exercises).sort((a,b) => a.name.localeCompare(b.name));
-  
+
+  const allExercises = Object.values(DB.exercises);
+
+  // Show empty state if no exercises exist at all
+  if (allExercises.length === 0) {
+    container.innerHTML = '<p class="muted" style="padding: 20px; text-align: center;">No exercises yet. Click "+ NEW" to add your first exercise!</p>';
+    return;
+  }
+
+  const list = allExercises
+    .filter(ex => {
+      if (filter && ex.muscle !== filter) return false;
+      if (search && !ex.name.toLowerCase().includes(search)) return false;
+      return true;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  // Show message if filters return no results
+  if (list.length === 0) {
+    container.innerHTML = '<p class="muted" style="padding: 20px; text-align: center;">No exercises match your search.</p>';
+    return;
+  }
+
   list.forEach(ex => {
-    if (filter && ex.muscle !== filter) return;
-    if (search && !ex.name.toLowerCase().includes(search)) return;
-    
     const div = document.createElement("div");
     div.className = `ex-item ex-cat-${ex.muscle || 'Other'}`;
     div.innerHTML = `
-      <span>${ex.name} <span class="muscle-tag">${ex.muscle || 'Gen'}</span></span>
+      <span>${ex.name} <span class="muscle-tag">${ex.muscle || 'Other'}</span></span>
       <button class="btn-ghost icon-btn" onclick="editExercise('${ex.id}')">✎</button>
     `;
     container.appendChild(div);
@@ -190,6 +246,10 @@ function populateSelects() {
     <option value="bodyweight">Bodyweight</option>
   `;
 }
+
+// Library filter/search listeners
+$("#filterMuscle").addEventListener("change", renderExerciseLibrary);
+$("#searchEx").addEventListener("input", renderExerciseLibrary);
 
 $("#btnShowAddEx").addEventListener("click", () => {
   // Reset form for new exercise
@@ -644,6 +704,10 @@ function simpleLineChart(ctx, labels, dataPoints, color) {
 }
 
 function renderStats() {
+    // Draw bodyweight chart
+    drawBodyweightChart();
+    $("#bwInput").value = "";
+
     // Populate select
     const sel = $("#statExSelect");
     if(sel.options.length === 0) {
@@ -772,10 +836,34 @@ $("#fileRestore").addEventListener("change", (e) => {
 
 // --- PICKER UTILS ---
 let _pickerCallback = null;
+let _pickerFilter = "All";
+
 function openExercisePicker(cb) {
     _pickerCallback = cb;
+    _pickerFilter = "All";
+    $("#pickerSearch").value = "";
     $("#pickerModal").classList.remove("hidden");
+    renderPickerTabs();
     renderPickerList();
+}
+
+function renderPickerTabs() {
+    const container = $("#pickerTabs");
+    container.innerHTML = "";
+
+    const allTab = document.createElement("button");
+    allTab.className = `picker-tab ${_pickerFilter === "All" ? "active" : ""}`;
+    allTab.textContent = "All";
+    allTab.onclick = () => { _pickerFilter = "All"; renderPickerTabs(); renderPickerList(); };
+    container.appendChild(allTab);
+
+    MUSCLE_GROUPS.forEach(muscle => {
+        const tab = document.createElement("button");
+        tab.className = `picker-tab ${_pickerFilter === muscle ? "active" : ""}`;
+        tab.textContent = muscle;
+        tab.onclick = () => { _pickerFilter = muscle; renderPickerTabs(); renderPickerList(); };
+        container.appendChild(tab);
+    });
 }
 
 $("#pickerSearch").addEventListener("input", renderPickerList);
@@ -784,10 +872,23 @@ function renderPickerList() {
     const q = $("#pickerSearch").value.toLowerCase();
     const div = $("#pickerList");
     div.innerHTML = "";
-    Object.values(DB.exercises).forEach(ex => {
-        if(!ex.name.toLowerCase().includes(q)) return;
+
+    const filtered = Object.values(DB.exercises)
+        .filter(ex => {
+            if (_pickerFilter !== "All" && ex.muscle !== _pickerFilter) return false;
+            if (q && !ex.name.toLowerCase().includes(q)) return false;
+            return true;
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+    if (filtered.length === 0) {
+        div.innerHTML = '<p class="muted" style="padding: 10px;">No exercises found</p>';
+        return;
+    }
+
+    filtered.forEach(ex => {
         const btn = document.createElement("div");
-        btn.className = "picker-item";
+        btn.className = `picker-item ex-cat-${ex.muscle || 'Other'}`;
         btn.textContent = ex.name;
         btn.onclick = () => {
             if(_pickerCallback) _pickerCallback(ex.id);
