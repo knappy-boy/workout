@@ -171,34 +171,81 @@ function populateSelects() {
 }
 
 $("#btnShowAddEx").addEventListener("click", () => {
+  // Reset form for new exercise
+  EDITING_EXERCISE_ID = null;
+  $("#exModalTitle").textContent = "NEW EXERCISE";
+  $("#newExName").value = "";
+  $("#newExType").value = "strength";
+  $("#newExMuscle").value = MUSCLE_GROUPS[0];
+  $("#newExEquip").value = "barbell";
+  $("#newExInc").value = "2.5";
+  $("#strengthOptions").classList.remove("hidden");
   $("#addExModal").showModal();
 });
 
-$("#btnCloseExModal").addEventListener("click", () => $("#addExModal").close());
+$("#btnCloseExModal").addEventListener("click", () => {
+  EDITING_EXERCISE_ID = null;
+  $("#addExModal").close();
+});
 
 $("#newExType").addEventListener("change", (e) => {
    if(e.target.value === 'cardio') $("#strengthOptions").classList.add("hidden");
    else $("#strengthOptions").classList.remove("hidden");
 });
 
+let EDITING_EXERCISE_ID = null;
+
 $("#btnSaveEx").addEventListener("click", () => {
   const name = $("#newExName").value.trim();
   if (!name) return;
-  
-  const id = uid();
+
   const type = $("#newExType").value;
-  DB.exercises[id] = {
-    id,
+  const exerciseData = {
     name,
     type,
     muscle: $("#newExMuscle").value,
     equip: $("#newExEquip").value,
     increment: parseFloat($("#newExInc").value) || 2.5
   };
+
+  if (EDITING_EXERCISE_ID) {
+    // Update existing exercise
+    DB.exercises[EDITING_EXERCISE_ID] = { ...DB.exercises[EDITING_EXERCISE_ID], ...exerciseData };
+  } else {
+    // Create new exercise
+    const id = uid();
+    DB.exercises[id] = { id, ...exerciseData };
+  }
+
+  EDITING_EXERCISE_ID = null;
   saveDB();
   $("#addExModal").close();
   renderExerciseLibrary();
 });
+
+function editExercise(id) {
+  const ex = DB.exercises[id];
+  if (!ex) return;
+
+  EDITING_EXERCISE_ID = id;
+  $("#exModalTitle").textContent = "EDIT EXERCISE";
+
+  // Pre-populate form with existing data
+  $("#newExName").value = ex.name;
+  $("#newExType").value = ex.type || 'strength';
+  $("#newExMuscle").value = ex.muscle || '';
+  $("#newExEquip").value = ex.equip || 'barbell';
+  $("#newExInc").value = ex.increment || 2.5;
+
+  // Show/hide strength options based on type
+  if (ex.type === 'cardio') {
+    $("#strengthOptions").classList.add("hidden");
+  } else {
+    $("#strengthOptions").classList.remove("hidden");
+  }
+
+  $("#addExModal").showModal();
+}
 
 // --- WORKOUT LOGGING ---
 function renderWorkoutTab() {
@@ -293,6 +340,17 @@ $("#btnAddExToWorkout").addEventListener("click", () => {
 });
 
 $("#btnFinishWorkout").addEventListener("click", () => {
+  // Check if any exercises were logged
+  const hasEntries = Object.values(ACTIVE_SESSION.entries).some(sets => sets && sets.length > 0);
+
+  if (!hasEntries) {
+    if (confirm("No exercises logged. Discard this workout?")) {
+      ACTIVE_SESSION = null;
+      renderWorkoutTab();
+    }
+    return;
+  }
+
   if (!confirm("Finish and save workout?")) return;
   ACTIVE_SESSION.end = new Date().toISOString();
   DB.sessions.unshift(ACTIVE_SESSION);
@@ -346,21 +404,19 @@ function openLogger(exId) {
   $("#logModal").classList.remove("hidden");
 }
 
-function addLogRow(ex, data = null, isGhost = false) {
+function addLogRow(ex, data = null, isGhost = false, prevWeight = null) {
   const row = document.createElement("div");
   row.className = "log-row";
-  
+
   const val1 = data ? (ex.type==='cardio' ? data.time : data.w) : "";
   const val2 = data ? (ex.type==='cardio' ? data.dist : data.r) : "";
-  
+
   // Suggestion logic (Weight Increment)
   let placeholder1 = "";
   let placeholder2 = "";
-  let val1Attrs = `class="neo-input input-val-1" type="number" step="${ex.increment || 1}"`;
-  
+
   if (isGhost && data) {
-    // If auto-filling, apply suggestion logic
-    // E.g. if last reps >= 12, suggest weight + increment
+    // If auto-filling from history, apply suggestion logic
     if (ex.type !== 'cardio') {
        let w = parseFloat(data.w);
        let r = parseInt(data.r);
@@ -371,24 +427,44 @@ function addLogRow(ex, data = null, isGhost = false) {
         placeholder1 = data.time;
         placeholder2 = data.dist;
     }
+  } else if (prevWeight) {
+    // Auto-fill weight from previous set in current session
+    placeholder1 = prevWeight;
   }
 
-  const valueStr1 = isGhost ? `placeholder="${placeholder1}"` : `value="${val1}"`;
-  const valueStr2 = isGhost ? `placeholder="${placeholder2}"` : `value="${val2}"`;
-  const ghostClass = isGhost ? 'ghost-val' : '';
-  
+  let valueStr1, valueStr2;
+  let ghostClass = '';
+
+  if (data && !isGhost) {
+    // Editing existing data
+    valueStr1 = `value="${val1}"`;
+    valueStr2 = `value="${val2}"`;
+  } else if (placeholder1 || placeholder2) {
+    // Show as placeholder (ghost)
+    valueStr1 = placeholder1 ? `placeholder="${placeholder1}"` : '';
+    valueStr2 = placeholder2 ? `placeholder="${placeholder2}"` : '';
+    ghostClass = 'ghost-val';
+  } else {
+    valueStr1 = '';
+    valueStr2 = '';
+  }
+
   row.innerHTML = `
     <div class="text-center font-bold index-num">#</div>
-    <input ${val1Attrs} ${valueStr1} class="neo-input ${ghostClass}">
-    <input class="neo-input input-val-2 ${ghostClass}" type="number" ${valueStr2}>
+    <input class="neo-input input-val-1 ${ghostClass}" type="number" step="${ex.increment || 1}" inputmode="decimal" ${valueStr1}>
+    <input class="neo-input input-val-2 ${ghostClass}" type="number" inputmode="numeric" ${valueStr2}>
     <button class="btn-ghost text-red remove-row">✕</button>
   `;
-  
-  // Remove ghost class on input
+
+  // Remove ghost class on input and filter non-numeric
   row.querySelectorAll("input").forEach(inp => {
-      inp.addEventListener("input", () => inp.classList.remove("ghost-val"));
+      inp.addEventListener("input", (e) => {
+        inp.classList.remove("ghost-val");
+        // Strip non-numeric characters (allow decimal point for weight)
+        e.target.value = e.target.value.replace(/[^0-9.]/g, '');
+      });
   });
-  
+
   row.querySelector(".remove-row").addEventListener("click", () => row.remove());
   $("#logRows").appendChild(row);
   renumberRows();
@@ -399,7 +475,15 @@ function renumberRows() {
 }
 
 $("#btnAddRow").addEventListener("click", () => {
-    addLogRow(DB.exercises[CURRENT_LOG_EX]);
+    // Get weight from previous row to auto-fill
+    const rows = $$("#logRows .log-row");
+    let prevWeight = null;
+    if (rows.length > 0) {
+      const lastRow = rows[rows.length - 1];
+      const weightInput = lastRow.querySelector(".input-val-1");
+      prevWeight = weightInput.value || weightInput.placeholder;
+    }
+    addLogRow(DB.exercises[CURRENT_LOG_EX], null, false, prevWeight);
 });
 
 $("#btnSaveLog").addEventListener("click", () => {
