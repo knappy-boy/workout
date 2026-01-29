@@ -199,6 +199,21 @@
      </div>
   </div>
 
+  <dialog id="settingsModal" class="neo-modal">
+    <div class="modal-content">
+      <h3>SETTINGS</h3>
+      <label class="mt-2">
+        Bodyweight (kg)
+        <input id="settingsBodyweight" type="number" step="0.1" class="neo-input" placeholder="e.g. 75">
+      </label>
+      <p class="muted small mt-2">Used for calculating effective weight on assisted exercises</p>
+      <div class="row mt-4">
+        <button id="btnCloseSettings" class="btn-ghost">CANCEL</button>
+        <button id="btnSaveSettings" class="btn-red">SAVE</button>
+      </div>
+    </div>
+  </dialog>
+
   <script src="app.js"></script>
   <script>
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js");

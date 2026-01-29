@@ -121,7 +121,28 @@ function renderCalendar() {
 }
 
 // --- EXERCISES ---
-const MUSCLE_GROUPS = ["Push", "Pull", "Legs", "Core", "Cardio", "Other"];
+const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Core", "Cardio", "Other"];
+
+// Migration map for old categories
+const MUSCLE_MIGRATION = {
+  "Push": "Chest",
+  "Pull": "Back",
+  "Legs": "Quads"
+};
+
+function migrateExerciseCategories() {
+  let migrated = false;
+  Object.values(DB.exercises).forEach(ex => {
+    if (MUSCLE_MIGRATION[ex.muscle]) {
+      ex.muscle = MUSCLE_MIGRATION[ex.muscle];
+      migrated = true;
+    }
+  });
+  if (migrated) {
+    saveDB();
+    console.log("Migrated exercise categories to new muscle groups");
+  }
+}
 
 function renderExerciseLibrary() {
   const container = $("#exerciseList");
@@ -664,6 +685,8 @@ function updateStatsChart() {
 }
 
 // --- EXPORT / IMPORT ---
+const DATA_VERSION = 1;
+
 $("#btnExportCSV").addEventListener("click", () => {
     let csv = "Date,Exercise,Set,Weight/Time,Reps/Dist\n";
     DB.sessions.forEach(s => {
@@ -677,12 +700,74 @@ $("#btnExportCSV").addEventListener("click", () => {
             });
         });
     });
-    
+
     const blob = new Blob([csv], {type: "text/csv"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = "liftlog_export.csv";
     a.click();
+});
+
+$("#btnExportJSON").addEventListener("click", () => {
+    const exportData = {
+        version: DATA_VERSION,
+        exportedAt: new Date().toISOString(),
+        data: DB
+    };
+    const json = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([json], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `liftlog_backup_${new Date().toISOString().split("T")[0]}.json`;
+    a.click();
+});
+
+$("#fileRestore").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+        try {
+            const imported = JSON.parse(evt.target.result);
+
+            // Validate structure
+            let dataToRestore;
+            if (imported.version && imported.data) {
+                // New format with version
+                dataToRestore = imported.data;
+            } else if (imported.exercises && imported.sessions) {
+                // Old format (direct DB export)
+                dataToRestore = imported;
+            } else {
+                throw new Error("Invalid backup file structure");
+            }
+
+            // Validate required fields
+            if (!dataToRestore.exercises || !dataToRestore.sessions) {
+                throw new Error("Missing required data fields");
+            }
+
+            if (!confirm("This will replace all your current data. Continue?")) return;
+
+            DB = dataToRestore;
+            // Ensure all required fields exist
+            if (!DB.bodyweight) DB.bodyweight = [];
+            if (!DB.templates) DB.templates = {};
+            if (!DB.user) DB.user = { theme: "light" };
+
+            saveDB();
+            migrateExerciseCategories();
+            document.body.className = `theme-${DB.user.theme}`;
+            renderCurrentTab("dashboard");
+            alert("Data restored successfully!");
+        } catch (err) {
+            alert("Error restoring backup: " + err.message);
+        }
+    };
+    reader.readAsText(file);
+    e.target.value = ""; // Reset file input
 });
 
 // --- PICKER UTILS ---
@@ -721,6 +806,28 @@ $("#btnTheme").addEventListener("click", () => {
    saveDB();
 });
 
+// Settings Modal
+$("#btnSettings").addEventListener("click", () => {
+  $("#settingsBodyweight").value = DB.user.bodyweight || "";
+  $("#settingsModal").showModal();
+});
+
+$("#btnCloseSettings").addEventListener("click", () => {
+  $("#settingsModal").close();
+});
+
+$("#btnSaveSettings").addEventListener("click", () => {
+  const bw = parseFloat($("#settingsBodyweight").value);
+  if (bw && bw > 0) {
+    DB.user.bodyweight = bw;
+  } else {
+    delete DB.user.bodyweight;
+  }
+  saveDB();
+  $("#settingsModal").close();
+});
+
 // Initialization
+migrateExerciseCategories();
 populateSelects();
 renderCurrentTab("dashboard");

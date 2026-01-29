@@ -30,6 +30,9 @@ h1, h2, h3 { margin: 0; font-weight: 900; letter-spacing: -0.5px; text-transform
 h1 { font-size: 24px; font-style: italic; }
 h1 .outline { color: transparent; -webkit-text-stroke: 1px var(--black); }
 .muted-white { color: rgba(255,255,255,0.7); font-size: 0.9rem; }
+.muted { color: rgba(0,0,0,0.5); }
+.theme-dark .muted { color: rgba(255,255,255,0.5); }
+.small { font-size: 0.85rem; }
 
 /* LAYOUT */
 header { display: flex; justify-content: space-between; padding: 15px; background: var(--white); border-bottom: var(--border); position: sticky; top: 0; z-index: 100; }
@@ -91,10 +94,18 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .exercise-grid { display: grid; gap: 10px; }
 .ex-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border: 2px solid var(--black); background: var(--gray); font-weight: bold; }
 .muscle-tag { font-size: 0.7rem; padding: 2px 6px; background: var(--black); color: var(--white); margin-left: 5px; text-transform: uppercase; }
-.ex-cat-Push { border-left: 5px solid #FF3333; }
-.ex-cat-Pull { border-left: 5px solid #3399FF; }
-.ex-cat-Legs { border-left: 5px solid #33FF33; }
+/* Muscle group colors */
+.ex-cat-Chest { border-left: 5px solid #FF3333; }
+.ex-cat-Back { border-left: 5px solid #3399FF; }
+.ex-cat-Shoulders { border-left: 5px solid #FF9933; }
+.ex-cat-Biceps { border-left: 5px solid #9933FF; }
+.ex-cat-Triceps { border-left: 5px solid #FF33FF; }
+.ex-cat-Quads { border-left: 5px solid #33FF33; }
+.ex-cat-Hamstrings { border-left: 5px solid #33FFAA; }
+.ex-cat-Glutes { border-left: 5px solid #33FFFF; }
+.ex-cat-Core { border-left: 5px solid #AAAAAA; }
 .ex-cat-Cardio { border-left: 5px solid #FFEB3B; }
+.ex-cat-Other { border-left: 5px solid #666666; }
 
 /* HISTORY STREAM */
 .history-entry { margin-bottom: 20px; border-left: 4px solid var(--black); padding-left: 15px; }
