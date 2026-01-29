@@ -66,6 +66,7 @@ function renderCurrentTab(tab) {
 
 // --- DASHBOARD ---
 function renderDashboard() {
+  populateDashboardTemplates();
   renderRecentLogs();
   renderCalendar();
 }
@@ -105,11 +106,25 @@ function renderRecentLogs() {
   });
 }
 
-// Quick Start button - starts freestyle workout directly
+// Quick Start button - starts workout with optional template
 $("#btnQuickStart").addEventListener("click", () => {
-  startWorkout();
+  const templateId = $("#dashboardTemplateSelect").value;
+  if (templateId) {
+    startWorkout(DB.templates[templateId]);
+  } else {
+    startWorkout();
+  }
   $(".tab[data-tab='workout']").click();
 });
+
+function populateDashboardTemplates() {
+  const sel = $("#dashboardTemplateSelect");
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Freestyle (no template)</option>';
+  Object.values(DB.templates).forEach(t => {
+    sel.innerHTML += `<option value="${t.id}">${t.name}</option>`;
+  });
+}
 
 $("#btnLogBW").addEventListener("click", () => {
   const kg = parseFloat($("#bwInput").value);
@@ -613,22 +628,23 @@ $("#btnStartTemplate").addEventListener("click", () => {
 
 function startWorkout(template = null) {
   if (ACTIVE_SESSION && !confirm("Overwrite current workout?")) return;
-  
+
   ACTIVE_SESSION = {
     id: uid(),
     start: new Date().toISOString(),
     entries: {}, // exId -> []
-    order: [] // list of exIds to maintain order
+    order: [], // list of exIds to maintain order
+    templateName: template ? template.name : null,
+    templateId: template ? template.id : null
   };
-  
+
   if (template) {
     template.exercises.forEach(item => {
       ACTIVE_SESSION.order.push(item.exId);
-      // Pre-fill planned sets? For now just adding exercise to list
     });
   }
-  
-  saveDB(); // Persist active state (could save to separate 'active' key)
+
+  saveDB();
   renderWorkoutTab();
 }
 
@@ -963,12 +979,16 @@ function renderHistory() {
        details += `<div class="history-detail"><strong>${exName}</strong>${ex?.isAssisted ? ' <span class="muted small">(assisted)</span>' : ''}<br>${badges}</div>`;
     });
 
+    const templateBadge = sess.templateName
+      ? `<span class="template-badge">${sess.templateName}</span>`
+      : '<span class="template-badge freestyle">Freestyle</span>';
+
     div.innerHTML = `
       <div class="row">
         <div class="history-date">${date}</div>
         <button class="btn-ghost small text-red" onclick="deleteWorkout(${idx})">DELETE</button>
       </div>
-      <div class="muted small">${(sess.order||[]).length} Exercises</div>
+      <div class="history-meta">${templateBadge} · ${(sess.order||[]).length} exercises</div>
       ${details}
     `;
     cont.appendChild(div);
@@ -1047,32 +1067,59 @@ function updateStatsChart() {
     const isDark = document.body.classList.contains("theme-dark");
     const textColor = isDark ? "#fff" : "#000";
 
+    const historyContainer = $("#exerciseHistory");
+
     if(!exId) {
         ctx.clearRect(0, 0, w, h);
         ctx.font = "14px -apple-system, sans-serif";
         ctx.fillStyle = textColor;
         ctx.textAlign = "center";
         ctx.fillText("Select an exercise", w / 2, h / 2);
+        if (historyContainer) historyContainer.innerHTML = "";
         return;
     }
 
-    // Extract history - calculate total volume (weight × reps × sets)
+    const ex = DB.exercises[exId];
+
+    // Extract history - calculate total volume (weight × reps)
     const history = [];
     DB.sessions.slice().reverse().forEach(s => {
         if(s.entries && s.entries[exId] && s.entries[exId].length > 0) {
             let totalVolume = 0;
-            s.entries[exId].forEach(set => {
+            const sets = s.entries[exId];
+            sets.forEach(set => {
                 const weight = parseFloat(set.w || 0);
                 const reps = parseInt(set.r || 0);
                 totalVolume += weight * reps;
             });
-            if(totalVolume > 0) {
-                history.push({ date: s.start, volume: totalVolume });
-            }
+            history.push({ date: s.start, volume: totalVolume, sets: sets });
         }
     });
 
-    if(history.length < 2) {
+    // Render history list
+    if (historyContainer) {
+        if (history.length === 0) {
+            historyContainer.innerHTML = '<p class="muted">No history for this exercise yet.</p>';
+        } else {
+            let html = '<h3 class="mb-2">LIFT HISTORY</h3>';
+            history.slice(0, 10).forEach(h => {
+                const date = new Date(h.date);
+                const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+                const setsHtml = h.sets.map(s => {
+                    if (s.w) return `<span class="set-tag">${s.w}kg × ${s.r}</span>`;
+                    if (s.time) return `<span class="set-tag">${s.time}m / ${s.dist}${ex?.cardioMetric || 'km'}</span>`;
+                    return '';
+                }).join('');
+                html += `<div class="ex-history-item"><strong>${dateStr}</strong> ${setsHtml}</div>`;
+            });
+            if (history.length > 10) {
+                html += `<p class="muted small">+ ${history.length - 10} more sessions</p>`;
+            }
+            historyContainer.innerHTML = html;
+        }
+    }
+
+    if(history.length < 2 || history.every(h => h.volume === 0)) {
         ctx.clearRect(0, 0, w, h);
         ctx.font = "14px -apple-system, sans-serif";
         ctx.fillStyle = textColor;

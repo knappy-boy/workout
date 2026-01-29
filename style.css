@@ -121,8 +121,12 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 
 /* HISTORY STREAM */
 .history-entry { margin-bottom: 20px; border-left: 4px solid var(--black); padding-left: 15px; }
-.history-date { font-weight: 900; margin-bottom: 5px; }
+.history-date { font-weight: 900; }
+.history-meta { font-size: 0.85rem; margin-bottom: 8px; color: #666; }
+.theme-dark .history-meta { color: #aaa; }
 .history-detail { font-size: 0.9rem; margin-top: 5px; }
+.template-badge { display: inline-block; padding: 2px 8px; background: #E8A0A0; color: #000; font-size: 0.75rem; font-weight: bold; border-radius: 4px; }
+.template-badge.freestyle { background: #ddd; }
 .set-tag { display: inline-block; background: #ddd; padding: 2px 5px; margin: 2px; font-size: 0.8rem; border: 1px solid #000; }
 .theme-dark .set-tag { background: #333; border-color: #fff; }
 
@@ -154,8 +158,9 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
 .cal-day { aspect-ratio: 1; border: 1px solid #1a1a1a; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.8rem; background: #fff; color: #1a1a1a; cursor: pointer; padding: 2px; }
 .cal-day.empty { background: transparent; border: none; cursor: default; }
-.cal-day.has-workout { background: #f0f0f0; font-weight: bold; }
-.cal-day.today { border: 2px solid var(--red) !important; }
+.cal-day.has-workout { background: #1a1a1a; color: #fff; font-weight: bold; }
+.cal-day.today { border: 3px solid var(--red) !important; }
+.theme-dark .cal-day.has-workout { background: #fff; color: #1a1a1a; }
 .cal-day-num { line-height: 1; }
 .cal-dots { display: flex; gap: 2px; margin-top: 2px; flex-wrap: wrap; justify-content: center; }
 .cal-dot { width: 6px; height: 6px; border-radius: 50%; }
@@ -164,6 +169,12 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .day-exercise { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #eee; }
 .day-exercise:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
 .theme-dark .day-exercise { border-color: #333; }
+
+/* EXERCISE HISTORY IN STATS */
+.exercise-history { max-height: 300px; overflow-y: auto; }
+.ex-history-item { padding: 8px 0; border-bottom: 1px solid #eee; }
+.ex-history-item:last-child { border-bottom: none; }
+.theme-dark .ex-history-item { border-color: #333; }
 
 /* CHARTS */
 .chart-container { position: relative; width: 100%; height: 200px; }

@@ -31,7 +31,13 @@
 
   <main>
     <section id="tab-dashboard" class="panel active">
-      <button id="btnQuickStart" class="btn-red full quick-start-btn">START WORKOUT</button>
+      <div class="neo-card bg-white">
+        <h2>START WORKOUT</h2>
+        <select id="dashboardTemplateSelect" class="neo-select full mt-2">
+          <option value="">Freestyle (no template)</option>
+        </select>
+        <button id="btnQuickStart" class="btn-red full mt-2 quick-start-btn">START</button>
+      </div>
 
       <div class="neo-card bg-white mt-4">
         <h2>RECENT WORKOUTS</h2>
@@ -185,7 +191,7 @@
         <div class="chart-container large">
           <canvas id="progChart"></canvas>
         </div>
-        <div id="statRecords" class="records-grid mt-2"></div>
+        <div id="exerciseHistory" class="exercise-history mt-4"></div>
       </div>
        <div class="neo-card bg-black text-white mt-4">
         <h2>DATA</h2>
