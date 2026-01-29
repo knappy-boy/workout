@@ -181,25 +181,32 @@ function drawBodyweightChart() {
     return;
   }
 
-  const padding = { top: 20, right: 20, bottom: 40, left: 50 };
+  const padding = { top: 20, right: 20, bottom: 40, left: 45 };
   const chartW = w - padding.left - padding.right;
   const chartH = h - padding.top - padding.bottom;
 
   const values = data.map(d => d.kg);
-  const maxVal = Math.max(...values) + 1;
-  const minVal = Math.min(...values) - 1;
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+
+  // Round to nice 5kg intervals
+  const minVal = Math.floor(dataMin / 5) * 5 - 5;
+  const maxVal = Math.ceil(dataMax / 5) * 5 + 5;
   const range = maxVal - minVal;
+  const stepSize = 5;
+  const numSteps = Math.ceil(range / stepSize);
 
   ctx.clearRect(0, 0, w, h);
 
-  // Draw Y axis labels (weight)
+  // Draw Y axis labels (weight) - nice round numbers
   ctx.font = "11px -apple-system, sans-serif";
   ctx.fillStyle = textColor;
   ctx.textAlign = "right";
-  for (let i = 0; i <= 4; i++) {
-    const val = minVal + (range * i / 4);
-    const y = padding.top + chartH - (chartH * i / 4);
-    ctx.fillText(val.toFixed(1), padding.left - 8, y + 4);
+  for (let i = 0; i <= numSteps; i++) {
+    const val = minVal + (i * stepSize);
+    if (val > maxVal) break;
+    const y = padding.top + chartH - ((val - minVal) / range) * chartH;
+    ctx.fillText(val.toFixed(0), padding.left - 8, y + 4);
     // Grid line
     ctx.strokeStyle = isDark ? "#333" : "#ddd";
     ctx.beginPath();
@@ -322,10 +329,30 @@ function renderExerciseLibrary() {
 
   list.forEach(ex => {
     const div = document.createElement("div");
-    div.className = `ex-item ex-cat-${ex.muscle || 'Other'}`;
+    div.className = `ex-item-card ex-cat-${ex.muscle || 'Other'}`;
+
+    // Get last session data for this exercise
+    const lastSession = findLastSessionWithExercise(ex.id);
+    let historyHtml = '<div class="ex-history muted small">No history yet</div>';
+
+    if (lastSession) {
+      const date = new Date(lastSession.date);
+      const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      const sets = lastSession.sets.map(s => {
+        if (s.w) return `${s.w}kg × ${s.r}`;
+        if (s.time) return `${s.time}m / ${s.dist}km`;
+        return '';
+      }).filter(Boolean).join(', ');
+
+      historyHtml = `<div class="ex-history"><span class="muted small">${dateStr}:</span> <span class="small">${sets}</span></div>`;
+    }
+
     div.innerHTML = `
-      <span>${ex.name} <span class="muscle-tag">${ex.muscle || 'Other'}</span></span>
-      <button class="btn-ghost icon-btn" onclick="editExercise('${ex.id}')">✎</button>
+      <div class="ex-item-header">
+        <span class="ex-name">${ex.name} <span class="muscle-tag">${ex.muscle || 'Other'}</span></span>
+        <button class="btn-ghost icon-btn" onclick="editExercise('${ex.id}')">✎</button>
+      </div>
+      ${historyHtml}
     `;
     container.appendChild(div);
   });
@@ -848,29 +875,121 @@ function renderStats() {
 
 function updateStatsChart() {
     const exId = $("#statExSelect").value;
-    if(!exId) return;
-    
-    // Extract history
-    const history = [];
-    DB.sessions.slice().reverse().forEach(s => {
-        if(s.entries && s.entries[exId]) {
-            // Calculate 1RM estimate or max volume
-            const bestSet = s.entries[exId].reduce((prev, curr) => {
-                const w = parseFloat(curr.w || 0);
-                return w > prev ? w : prev;
-            }, 0);
-            if(bestSet > 0) history.push({ date: s.start, val: bestSet });
-        }
-    });
-    
     const ctx = $("#progChart").getContext("2d");
-    if(history.length < 2) {
-        // clear
-        ctx.clearRect(0,0,300,150);
+
+    // Reset canvas
+    ctx.canvas.width = ctx.canvas.offsetWidth;
+    ctx.canvas.height = ctx.canvas.offsetHeight;
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+
+    const isDark = document.body.classList.contains("theme-dark");
+    const textColor = isDark ? "#fff" : "#000";
+
+    if(!exId) {
+        ctx.clearRect(0, 0, w, h);
+        ctx.font = "14px -apple-system, sans-serif";
+        ctx.fillStyle = textColor;
+        ctx.textAlign = "center";
+        ctx.fillText("Select an exercise", w / 2, h / 2);
         return;
     }
-    
-    simpleLineChart(ctx, history.map((_,i)=>i), history.map(h=>h.val), "#000");
+
+    // Extract history - calculate total volume (weight × reps × sets)
+    const history = [];
+    DB.sessions.slice().reverse().forEach(s => {
+        if(s.entries && s.entries[exId] && s.entries[exId].length > 0) {
+            let totalVolume = 0;
+            s.entries[exId].forEach(set => {
+                const weight = parseFloat(set.w || 0);
+                const reps = parseInt(set.r || 0);
+                totalVolume += weight * reps;
+            });
+            if(totalVolume > 0) {
+                history.push({ date: s.start, volume: totalVolume });
+            }
+        }
+    });
+
+    if(history.length < 2) {
+        ctx.clearRect(0, 0, w, h);
+        ctx.font = "14px -apple-system, sans-serif";
+        ctx.fillStyle = textColor;
+        ctx.textAlign = "center";
+        ctx.fillText("Need more data for chart", w / 2, h / 2);
+        return;
+    }
+
+    const padding = { top: 20, right: 20, bottom: 40, left: 55 };
+    const chartW = w - padding.left - padding.right;
+    const chartH = h - padding.top - padding.bottom;
+
+    const volumes = history.map(h => h.volume);
+    const dataMin = Math.min(...volumes);
+    const dataMax = Math.max(...volumes);
+
+    // Round to nice intervals
+    const range = dataMax - dataMin || 1;
+    const magnitude = Math.pow(10, Math.floor(Math.log10(range)));
+    const stepSize = magnitude > 100 ? Math.ceil(range / 4 / magnitude) * magnitude : Math.ceil(range / 4 / 50) * 50 || 100;
+
+    const minVal = Math.floor(dataMin / stepSize) * stepSize;
+    const maxVal = Math.ceil(dataMax / stepSize) * stepSize + stepSize;
+    const finalRange = maxVal - minVal;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Y axis labels (volume)
+    ctx.font = "10px -apple-system, sans-serif";
+    ctx.fillStyle = textColor;
+    ctx.textAlign = "right";
+    const numSteps = Math.min(5, Math.ceil(finalRange / stepSize));
+    for (let i = 0; i <= numSteps; i++) {
+        const val = minVal + (i * stepSize);
+        if (val > maxVal) break;
+        const y = padding.top + chartH - ((val - minVal) / finalRange) * chartH;
+        ctx.fillText(val.toLocaleString(), padding.left - 8, y + 4);
+        ctx.strokeStyle = isDark ? "#333" : "#ddd";
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(w - padding.right, y);
+        ctx.stroke();
+    }
+
+    // X axis labels (dates)
+    ctx.textAlign = "center";
+    const step = Math.max(1, Math.floor(history.length / 5));
+    history.forEach((h, i) => {
+        if (i % step === 0 || i === history.length - 1) {
+            const x = padding.left + (i / (history.length - 1)) * chartW;
+            const date = new Date(h.date);
+            const label = `${date.getDate()}/${date.getMonth() + 1}`;
+            ctx.fillText(label, x, ctx.canvas.height - padding.bottom + 20);
+        }
+    });
+
+    // Draw line
+    ctx.beginPath();
+    ctx.strokeStyle = "#1a1a1a";
+    if (isDark) ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 3;
+    history.forEach((h, i) => {
+        const x = padding.left + (i / (history.length - 1)) * chartW;
+        const y = padding.top + chartH - ((h.volume - minVal) / finalRange) * chartH;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Draw dots
+    ctx.fillStyle = ctx.strokeStyle;
+    history.forEach((h, i) => {
+        const x = padding.left + (i / (history.length - 1)) * chartW;
+        const y = padding.top + chartH - ((h.volume - minVal) / finalRange) * chartH;
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fill();
+    });
 }
 
 // --- EXPORT / IMPORT ---
