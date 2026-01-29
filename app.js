@@ -444,8 +444,10 @@ function renderExerciseLibrary() {
   }
 
   list.forEach(ex => {
+    // Determine category for styling - cardio uses type, others use muscle
+    const category = ex.type === 'cardio' ? 'Cardio' : (ex.muscle || 'Other');
     const div = document.createElement("div");
-    div.className = `ex-item-card ex-cat-${ex.muscle || 'Other'}`;
+    div.className = `ex-item-card ex-cat-${category}`;
 
     // Get last session data for this exercise
     const lastSession = findLastSessionWithExercise(ex.id);
@@ -456,16 +458,19 @@ function renderExerciseLibrary() {
       const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
       const sets = lastSession.sets.map(s => {
         if (s.w) return `${s.w}kg × ${s.r}`;
-        if (s.time) return `${s.time}m / ${s.dist}km`;
+        if (s.time) return `${s.time}m / ${s.dist}${ex.cardioMetric || 'km'}`;
         return '';
       }).filter(Boolean).join(', ');
 
       historyHtml = `<div class="ex-history"><span class="muted small">${dateStr}:</span> <span class="small">${sets}</span></div>`;
     }
 
+    // Label shows "Cardio" for cardio type, muscle name for strength
+    const labelText = ex.type === 'cardio' ? 'Cardio' : (ex.muscle || 'Other');
+
     div.innerHTML = `
       <div class="ex-item-header">
-        <span class="ex-name">${ex.name} <span class="muscle-tag">${ex.muscle || 'Other'}</span></span>
+        <span class="ex-name">${ex.name} <span class="muscle-tag">${labelText}</span></span>
         <button class="btn-ghost icon-btn" onclick="editExercise('${ex.id}')">✎</button>
       </div>
       ${historyHtml}
@@ -1003,6 +1008,21 @@ function renderHistory() {
 
       const date = new Date(sess.start).toDateString();
 
+      // Calculate workout duration
+      let durationStr = "";
+      if (sess.end) {
+        const startTime = new Date(sess.start).getTime();
+        const endTime = new Date(sess.end).getTime();
+        const durationMins = Math.round((endTime - startTime) / 60000);
+        if (durationMins >= 60) {
+          const hours = Math.floor(durationMins / 60);
+          const mins = durationMins % 60;
+          durationStr = `${hours}h ${mins}m`;
+        } else {
+          durationStr = `${durationMins}m`;
+        }
+      }
+
       let details = "";
       (sess.order || []).forEach(exId => {
          const sets = sess.entries[exId];
@@ -1032,7 +1052,7 @@ function renderHistory() {
 
       div.innerHTML = `
         <div class="row">
-          <div class="history-date">${date}</div>
+          <div class="history-date">${date}${durationStr ? ` <span class="muted small">(${durationStr})</span>` : ''}</div>
           <button class="btn-ghost small text-red" onclick="deleteWorkout(${idx})">DELETE</button>
         </div>
         <div class="history-meta">${templateBadge} · ${(sess.order||[]).length} exercises</div>
@@ -1154,7 +1174,7 @@ function updateStatsChart() {
             historyContainer.innerHTML = '<p class="muted">No history for this exercise yet.</p>';
         } else {
             let html = '<h3 class="mb-2">LIFT HISTORY</h3>';
-            history.slice(0, 10).forEach(h => {
+            history.slice(0, 3).forEach(h => {
                 const date = new Date(h.date);
                 const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
                 const setsHtml = h.sets.map(s => {
@@ -1164,8 +1184,8 @@ function updateStatsChart() {
                 }).join('');
                 html += `<div class="ex-history-item"><strong>${dateStr}</strong> ${setsHtml}</div>`;
             });
-            if (history.length > 10) {
-                html += `<p class="muted small">+ ${history.length - 10} more sessions</p>`;
+            if (history.length > 3) {
+                html += `<p class="muted small">+ ${history.length - 3} more sessions</p>`;
             }
             historyContainer.innerHTML = html;
         }
