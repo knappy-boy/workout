@@ -246,9 +246,10 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .simple-list li div { display: flex; gap: 5px; }
 
 /* DRAG AND DROP */
-.drag-handle { cursor: grab; padding: 0 10px 0 0; font-size: 1.2rem; color: #999; user-select: none; }
+.drag-handle { cursor: grab; padding: 0 10px 0 0; font-size: 1.2rem; color: #999; user-select: none; touch-action: none; }
 .drag-handle:active { cursor: grabbing; }
 .draggable-exercise { cursor: default; transition: transform 0.15s, box-shadow 0.15s; }
-.draggable-exercise.dragging { opacity: 0.5; transform: scale(0.98); }
-.draggable-exercise.drag-over { border-color: var(--red) !important; box-shadow: 0 0 0 2px var(--red); }
+.draggable-exercise.dragging { opacity: 0.4; transform: scale(0.98); }
+.draggable-exercise.drag-over { border-color: var(--red) !important; box-shadow: 0 0 0 3px var(--red); }
+.touch-drag-clone { box-shadow: 0 10px 30px rgba(0,0,0,0.3); transform: rotate(2deg); }
 .flex-1 { flex: 1; }

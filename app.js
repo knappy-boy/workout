@@ -722,6 +722,11 @@ function startWorkout(template = null) {
   renderWorkoutTab();
 }
 
+// Touch drag state
+let _touchDragIdx = null;
+let _touchDragElement = null;
+let _touchDragClone = null;
+
 function renderActiveSession() {
   const list = $("#activeExerciseList");
   list.innerHTML = "";
@@ -746,7 +751,9 @@ function renderActiveSession() {
       <div class="muted small">${sets.length} sets logged</div>
     `;
 
-    // Drag events
+    const handle = div.querySelector(".drag-handle");
+
+    // Desktop drag events
     div.addEventListener("dragstart", (e) => {
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData("text/plain", idx);
@@ -780,9 +787,87 @@ function renderActiveSession() {
       div.classList.remove("drag-over");
     });
 
+    // Touch drag events (for mobile)
+    handle.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      _touchDragIdx = idx;
+      _touchDragElement = div;
+      div.classList.add("dragging");
+
+      // Create a visual clone that follows the finger
+      _touchDragClone = div.cloneNode(true);
+      _touchDragClone.classList.add("touch-drag-clone");
+      _touchDragClone.style.position = "fixed";
+      _touchDragClone.style.width = div.offsetWidth + "px";
+      _touchDragClone.style.zIndex = "1000";
+      _touchDragClone.style.pointerEvents = "none";
+      _touchDragClone.style.opacity = "0.8";
+      document.body.appendChild(_touchDragClone);
+
+      const touch = e.touches[0];
+      _touchDragClone.style.left = (touch.clientX - div.offsetWidth / 2) + "px";
+      _touchDragClone.style.top = (touch.clientY - 20) + "px";
+    }, { passive: false });
+
     list.appendChild(div);
   });
 }
+
+// Global touch move and end handlers
+document.addEventListener("touchmove", (e) => {
+  if (_touchDragClone === null) return;
+
+  const touch = e.touches[0];
+  _touchDragClone.style.left = (touch.clientX - _touchDragClone.offsetWidth / 2) + "px";
+  _touchDragClone.style.top = (touch.clientY - 20) + "px";
+
+  // Find element under touch point
+  _touchDragClone.style.display = "none";
+  const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+  _touchDragClone.style.display = "";
+
+  // Clear previous highlights
+  document.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+
+  // Find the draggable parent
+  if (elementBelow) {
+    const dropTarget = elementBelow.closest(".draggable-exercise");
+    if (dropTarget && dropTarget !== _touchDragElement) {
+      dropTarget.classList.add("drag-over");
+    }
+  }
+}, { passive: true });
+
+document.addEventListener("touchend", (e) => {
+  if (_touchDragClone === null) return;
+
+  // Find where we dropped
+  const touch = e.changedTouches[0];
+  _touchDragClone.style.display = "none";
+  const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+
+  if (elementBelow) {
+    const dropTarget = elementBelow.closest(".draggable-exercise");
+    if (dropTarget && dropTarget !== _touchDragElement) {
+      const toIdx = parseInt(dropTarget.dataset.idx);
+      const fromIdx = _touchDragIdx;
+      if (fromIdx !== toIdx) {
+        const [moved] = ACTIVE_SESSION.order.splice(fromIdx, 1);
+        ACTIVE_SESSION.order.splice(toIdx, 0, moved);
+        renderActiveSession();
+      }
+    }
+  }
+
+  // Cleanup
+  if (_touchDragElement) _touchDragElement.classList.remove("dragging");
+  if (_touchDragClone) _touchDragClone.remove();
+  document.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+
+  _touchDragIdx = null;
+  _touchDragElement = null;
+  _touchDragClone = null;
+});
 
 $("#btnAddExToWorkout").addEventListener("click", () => {
   openExercisePicker((exId) => {
