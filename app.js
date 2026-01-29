@@ -105,8 +105,9 @@ function renderRecentLogs() {
   });
 }
 
-// Quick Start button
+// Quick Start button - starts freestyle workout directly
 $("#btnQuickStart").addEventListener("click", () => {
+  startWorkout();
   $(".tab[data-tab='workout']").click();
 });
 
@@ -123,16 +124,85 @@ $("#btnLogBW").addEventListener("click", () => {
 function drawBodyweightChart() {
   const ctx = $("#bwChart").getContext("2d");
   const data = DB.bodyweight.slice(-14); // Last 14 entries
+
+  // Reset canvas
+  ctx.canvas.width = ctx.canvas.offsetWidth;
+  ctx.canvas.height = ctx.canvas.offsetHeight;
+  const w = ctx.canvas.width;
+  const h = ctx.canvas.height;
+
+  const isDark = document.body.classList.contains("theme-dark");
+  const textColor = isDark ? "#fff" : "#000";
+
   if (data.length < 2) {
-    ctx.clearRect(0,0,300,150);
-    ctx.font = "14px monospace";
-    ctx.fillText("Log more data to see chart", 50, 75);
+    ctx.clearRect(0, 0, w, h);
+    ctx.font = "14px -apple-system, sans-serif";
+    ctx.fillStyle = textColor;
+    ctx.textAlign = "center";
+    ctx.fillText("Log more data to see chart", w / 2, h / 2);
     return;
   }
-  
-  const labels = data.map(d => new Date(d.date).getDate());
+
+  const padding = { top: 20, right: 20, bottom: 40, left: 50 };
+  const chartW = w - padding.left - padding.right;
+  const chartH = h - padding.top - padding.bottom;
+
   const values = data.map(d => d.kg);
-  simpleLineChart(ctx, labels, values, "#FF3333");
+  const maxVal = Math.max(...values) + 1;
+  const minVal = Math.min(...values) - 1;
+  const range = maxVal - minVal;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Draw Y axis labels (weight)
+  ctx.font = "11px -apple-system, sans-serif";
+  ctx.fillStyle = textColor;
+  ctx.textAlign = "right";
+  for (let i = 0; i <= 4; i++) {
+    const val = minVal + (range * i / 4);
+    const y = padding.top + chartH - (chartH * i / 4);
+    ctx.fillText(val.toFixed(1), padding.left - 8, y + 4);
+    // Grid line
+    ctx.strokeStyle = isDark ? "#333" : "#ddd";
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(w - padding.right, y);
+    ctx.stroke();
+  }
+
+  // Draw X axis labels (dates)
+  ctx.textAlign = "center";
+  const step = Math.max(1, Math.floor(data.length / 5));
+  data.forEach((d, i) => {
+    if (i % step === 0 || i === data.length - 1) {
+      const x = padding.left + (i / (data.length - 1)) * chartW;
+      const date = new Date(d.date);
+      const label = `${date.getDate()}/${date.getMonth() + 1}`;
+      ctx.fillText(label, x, h - padding.bottom + 20);
+    }
+  });
+
+  // Draw line
+  ctx.beginPath();
+  ctx.strokeStyle = "#FF3333";
+  ctx.lineWidth = 3;
+  data.forEach((d, i) => {
+    const x = padding.left + (i / (data.length - 1)) * chartW;
+    const y = padding.top + chartH - ((d.kg - minVal) / range) * chartH;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Draw dots
+  ctx.fillStyle = "#FF3333";
+  data.forEach((d, i) => {
+    const x = padding.left + (i / (data.length - 1)) * chartW;
+    const y = padding.top + chartH - ((d.kg - minVal) / range) * chartH;
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fill();
+  });
 }
 
 function renderCalendar() {
@@ -909,7 +979,8 @@ $("#btnTheme").addEventListener("click", () => {
 
 // Settings Modal
 $("#btnSettings").addEventListener("click", () => {
-  $("#settingsBodyweight").value = DB.user.bodyweight || "";
+  const latestBW = getLatestBodyweight();
+  $("#settingsCurrentBW").textContent = latestBW ? latestBW.toFixed(1) : "--";
   $("#settingsModal").showModal();
 });
 
@@ -917,16 +988,11 @@ $("#btnCloseSettings").addEventListener("click", () => {
   $("#settingsModal").close();
 });
 
-$("#btnSaveSettings").addEventListener("click", () => {
-  const bw = parseFloat($("#settingsBodyweight").value);
-  if (bw && bw > 0) {
-    DB.user.bodyweight = bw;
-  } else {
-    delete DB.user.bodyweight;
-  }
-  saveDB();
-  $("#settingsModal").close();
-});
+// Helper to get latest bodyweight from chart data
+function getLatestBodyweight() {
+  if (DB.bodyweight.length === 0) return null;
+  return DB.bodyweight[DB.bodyweight.length - 1].kg;
+}
 
 // Initialization
 migrateExerciseCategories();

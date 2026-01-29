@@ -42,6 +42,10 @@ main { padding: 15px; max-width: 600px; margin: 0 auto; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .hidden { display: none !important; }
 
+/* PANELS - Tab content visibility */
+.panel { display: none; }
+.panel.active { display: block; }
+
 /* CARDS */
 .neo-card {
   border: var(--border); box-shadow: var(--shadow); padding: 15px; margin-bottom: 20px;
@@ -146,7 +150,9 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .theme-dark .cal-day.active { background: var(--red); color: #fff; }
 
 /* CHARTS */
-canvas { width: 100%; height: 250px; }
+.chart-container { position: relative; width: 100%; height: 200px; }
+.chart-container.large { height: 250px; }
+.chart-container canvas { width: 100% !important; height: 100% !important; }
 
 /* ANIMATIONS */
 @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }

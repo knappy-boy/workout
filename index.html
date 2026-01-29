@@ -210,14 +210,12 @@
   <dialog id="settingsModal" class="neo-modal">
     <div class="modal-content">
       <h3>SETTINGS</h3>
-      <label class="mt-2">
-        Bodyweight (kg)
-        <input id="settingsBodyweight" type="number" step="0.1" class="neo-input" placeholder="e.g. 75">
-      </label>
-      <p class="muted small mt-2">Used for calculating effective weight on assisted exercises</p>
+      <div class="mt-2">
+        <p class="muted small">Current bodyweight: <strong id="settingsCurrentBW">--</strong> kg</p>
+        <p class="muted small">(Log bodyweight in Stats tab)</p>
+      </div>
       <div class="row mt-4">
-        <button id="btnCloseSettings" class="btn-ghost">CANCEL</button>
-        <button id="btnSaveSettings" class="btn-red">SAVE</button>
+        <button id="btnCloseSettings" class="btn-ghost">CLOSE</button>
       </div>
     </div>
   </dialog>
