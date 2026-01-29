@@ -104,18 +104,18 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .theme-dark .ex-history { border-color: #444; }
 .theme-dark .ex-item-card { background: #1e1e1e; border-color: #444; }
 .muscle-tag { font-size: 0.7rem; padding: 2px 6px; background: var(--black); color: var(--white); margin-left: 5px; text-transform: uppercase; }
-/* Muscle group colors - pastel */
-.ex-cat-Chest { border-left: 5px solid #E8A0A0; }
-.ex-cat-Back { border-left: 5px solid #A0C4E8; }
-.ex-cat-Shoulders { border-left: 5px solid #E8C4A0; }
-.ex-cat-Biceps { border-left: 5px solid #C4A0E8; }
-.ex-cat-Triceps { border-left: 5px solid #E8A0D4; }
-.ex-cat-Quads { border-left: 5px solid #A0E8A0; }
-.ex-cat-Hamstrings { border-left: 5px solid #A0E8C4; }
-.ex-cat-Glutes { border-left: 5px solid #A0D4E8; }
-.ex-cat-Core { border-left: 5px solid #C4C4C4; }
-.ex-cat-Cardio { border-left: 5px solid #E8E0A0; }
-.ex-cat-Other { border-left: 5px solid #A0A0A0; }
+/* Muscle group colors */
+.ex-cat-Chest { border-left: 5px solid #E57373; }
+.ex-cat-Back { border-left: 5px solid #64B5F6; }
+.ex-cat-Shoulders { border-left: 5px solid #FFB74D; }
+.ex-cat-Biceps { border-left: 5px solid #BA68C8; }
+.ex-cat-Triceps { border-left: 5px solid #F06292; }
+.ex-cat-Quads { border-left: 5px solid #81C784; }
+.ex-cat-Hamstrings { border-left: 5px solid #4DB6AC; }
+.ex-cat-Glutes { border-left: 5px solid #4DD0E1; }
+.ex-cat-Core { border-left: 5px solid #90A4AE; }
+.ex-cat-Cardio { border-left: 5px solid #FFD54F; }
+.ex-cat-Other { border-left: 5px solid #78909C; }
 
 /* HISTORY STREAM */
 .history-entry { margin-bottom: 20px; border-left: 4px solid var(--black); padding-left: 15px; }
