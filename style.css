@@ -25,6 +25,15 @@ body.theme-dark {
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 body { margin: 0; background-color: var(--gray); color: var(--black); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding-bottom: 80px; transition: background 0.3s; }
 
+/* Hide scrollbars but keep scrolling */
+* {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
 /* TYPOGRAPHY */
 h1, h2, h3 { margin: 0; font-weight: 900; letter-spacing: -0.5px; text-transform: uppercase; }
 h1 { font-size: 24px; font-style: italic; }
