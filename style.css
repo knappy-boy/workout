@@ -236,3 +236,10 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .template-builder-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border: 2px solid var(--black); background: var(--gray); }
 .theme-dark .template-builder-item { background: #1e1e1e; border-color: #444; }
 .template-builder-empty { padding: 20px; text-align: center; color: #888; }
+
+/* SIMPLE LIST (Templates) */
+.simple-list { list-style: none; padding: 0; margin: 0; }
+.simple-list li { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #ddd; }
+.simple-list li:last-child { border-bottom: none; }
+.theme-dark .simple-list li { border-color: #444; }
+.simple-list li div { display: flex; gap: 5px; }

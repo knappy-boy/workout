@@ -521,6 +521,7 @@ $("#btnShowAddEx").addEventListener("click", () => {
   $("#strengthOptions").classList.remove("hidden");
   $("#cardioOptions").classList.add("hidden");
   $("#muscleSelectWrapper").classList.remove("hidden");
+  $("#btnDeleteEx").classList.add("hidden"); // Hide delete for new exercise
   $("#addExModal").showModal();
 });
 
@@ -600,8 +601,20 @@ function editExercise(id) {
     $("#muscleSelectWrapper").classList.remove("hidden");
   }
 
+  $("#btnDeleteEx").classList.remove("hidden"); // Show delete for existing exercise
   $("#addExModal").showModal();
 }
+
+$("#btnDeleteEx").addEventListener("click", () => {
+  if (!EDITING_EXERCISE_ID) return;
+  if (!confirm("Delete this exercise? This cannot be undone.")) return;
+
+  delete DB.exercises[EDITING_EXERCISE_ID];
+  EDITING_EXERCISE_ID = null;
+  saveDB();
+  $("#addExModal").close();
+  renderExerciseLibrary();
+});
 
 // --- WORKOUT LOGGING ---
 function renderWorkoutTab() {
@@ -934,14 +947,17 @@ function renderTemplates() {
     const list = $("#templateList");
     sel.innerHTML = '<option value="">Select Template...</option>';
     list.innerHTML = "";
-    
+
     Object.values(DB.templates).forEach(t => {
         sel.innerHTML += `<option value="${t.id}">${t.name}</option>`;
-        
+
         const li = document.createElement("li");
         li.innerHTML = `
-            <span>${t.name} (${t.exercises.length} ex)</span>
-            <button class="btn-ghost small text-red" onclick="deleteTemplate('${t.id}')">DEL</button>
+            <span>${t.name}</span>
+            <div>
+              <button class="btn-ghost small" onclick="editTemplate('${t.id}')">EDIT</button>
+              <button class="btn-ghost small text-red" onclick="deleteTemplate('${t.id}')">DEL</button>
+            </div>
         `;
         list.appendChild(li);
     });
@@ -956,13 +972,26 @@ function deleteTemplate(id) {
 
 // --- TEMPLATE BUILDER ---
 let _templateBuilderExercises = [];
+let _editingTemplateId = null;
 
 $("#btnNewTemplate").addEventListener("click", () => {
   _templateBuilderExercises = [];
+  _editingTemplateId = null;
   $("#templateBuilderName").value = "";
   renderTemplateBuilderList();
   $("#templateBuilderModal").showModal();
 });
+
+function editTemplate(id) {
+  const template = DB.templates[id];
+  if (!template) return;
+
+  _editingTemplateId = id;
+  _templateBuilderExercises = template.exercises.map(e => e.exId);
+  $("#templateBuilderName").value = template.name;
+  renderTemplateBuilderList();
+  $("#templateBuilderModal").showModal();
+}
 
 $("#btnAddExToTemplate").addEventListener("click", () => {
   // Temporarily close the template builder so picker appears on top
@@ -1029,14 +1058,22 @@ $("#btnSaveTemplateBuilder").addEventListener("click", () => {
     return;
   }
 
-  const tId = uid();
   const exercises = _templateBuilderExercises.map(id => ({ exId: id }));
-  DB.templates[tId] = { id: tId, name, exercises };
-  saveDB();
 
+  if (_editingTemplateId) {
+    // Update existing template
+    DB.templates[_editingTemplateId].name = name;
+    DB.templates[_editingTemplateId].exercises = exercises;
+  } else {
+    // Create new template
+    const tId = uid();
+    DB.templates[tId] = { id: tId, name, exercises };
+  }
+
+  saveDB();
+  _editingTemplateId = null;
   $("#templateBuilderModal").close();
   renderTemplates();
-  alert("Template created!");
 });
 
 // --- HISTORY & STATS ---
