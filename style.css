@@ -104,7 +104,7 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .ex-name { flex: 1; }
 .ex-history { margin-top: 6px; padding-top: 6px; border-top: 1px solid #ddd; }
 .theme-dark .ex-history { border-color: #444; }
-.theme-dark .ex-item-card { background: #1e1e1e; border-color: #444; }
+.theme-dark .ex-item-card { background: #1e1e1e; border-top-color: #444; border-right-color: #444; border-bottom-color: #444; }
 .muscle-tag { font-size: 0.7rem; padding: 2px 6px; background: var(--black); color: var(--white); margin-left: 5px; text-transform: uppercase; }
 /* Muscle group colors */
 .ex-cat-Chest { border-left: 5px solid #E57373; }
@@ -230,3 +230,9 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .timer-collapsed { display: none; margin-top: 10px; text-align: center; }
 .timer-expanded { display: block; }
 .timer-toggle.expanded { transform: rotate(180deg); }
+
+/* TEMPLATE BUILDER */
+.template-builder-list { display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; }
+.template-builder-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border: 2px solid var(--black); background: var(--gray); }
+.theme-dark .template-builder-item { background: #1e1e1e; border-color: #444; }
+.template-builder-empty { padding: 20px; text-align: center; color: #888; }

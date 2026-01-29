@@ -258,6 +258,26 @@
     </div>
   </dialog>
 
+  <dialog id="templateBuilderModal" class="neo-modal">
+    <div class="modal-content">
+      <h3>CREATE TEMPLATE</h3>
+      <label class="mt-2">Template Name
+        <input id="templateBuilderName" class="neo-input" placeholder="e.g. Push Day">
+      </label>
+      <div class="mt-4">
+        <div class="row">
+          <strong>Exercises</strong>
+          <button id="btnAddExToTemplate" class="btn-small">+ ADD</button>
+        </div>
+        <div id="templateBuilderList" class="template-builder-list mt-2"></div>
+      </div>
+      <div class="row mt-4">
+        <button id="btnCloseTemplateBuilder" class="btn-ghost">CANCEL</button>
+        <button id="btnSaveTemplateBuilder" class="btn-red">SAVE</button>
+      </div>
+    </div>
+  </dialog>
+
   <script src="app.js"></script>
   <script>
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js");

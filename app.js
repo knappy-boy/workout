@@ -954,6 +954,77 @@ function deleteTemplate(id) {
     renderTemplates();
 }
 
+// --- TEMPLATE BUILDER ---
+let _templateBuilderExercises = [];
+
+$("#btnNewTemplate").addEventListener("click", () => {
+  _templateBuilderExercises = [];
+  $("#templateBuilderName").value = "";
+  renderTemplateBuilderList();
+  $("#templateBuilderModal").showModal();
+});
+
+$("#btnAddExToTemplate").addEventListener("click", () => {
+  openExercisePicker((exId) => {
+    if (!_templateBuilderExercises.includes(exId)) {
+      _templateBuilderExercises.push(exId);
+      renderTemplateBuilderList();
+    }
+  });
+});
+
+function renderTemplateBuilderList() {
+  const container = $("#templateBuilderList");
+  container.innerHTML = "";
+
+  if (_templateBuilderExercises.length === 0) {
+    container.innerHTML = '<div class="template-builder-empty">No exercises added yet</div>';
+    return;
+  }
+
+  _templateBuilderExercises.forEach((exId, idx) => {
+    const ex = DB.exercises[exId];
+    if (!ex) return;
+
+    const div = document.createElement("div");
+    div.className = "template-builder-item";
+    div.innerHTML = `
+      <span>${ex.name}</span>
+      <button class="btn-ghost small text-red" data-idx="${idx}">✕</button>
+    `;
+    div.querySelector("button").addEventListener("click", () => {
+      _templateBuilderExercises.splice(idx, 1);
+      renderTemplateBuilderList();
+    });
+    container.appendChild(div);
+  });
+}
+
+$("#btnCloseTemplateBuilder").addEventListener("click", () => {
+  $("#templateBuilderModal").close();
+});
+
+$("#btnSaveTemplateBuilder").addEventListener("click", () => {
+  const name = $("#templateBuilderName").value.trim();
+  if (!name) {
+    alert("Please enter a template name");
+    return;
+  }
+  if (_templateBuilderExercises.length === 0) {
+    alert("Please add at least one exercise");
+    return;
+  }
+
+  const tId = uid();
+  const exercises = _templateBuilderExercises.map(id => ({ exId: id }));
+  DB.templates[tId] = { id: tId, name, exercises };
+  saveDB();
+
+  $("#templateBuilderModal").close();
+  renderTemplates();
+  alert("Template created!");
+});
+
 // --- HISTORY & STATS ---
 function renderHistory() {
   const cont = $("#historyLog");
