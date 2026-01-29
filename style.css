@@ -179,3 +179,10 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .recent-log-muscles { grid-column: 1 / -1; font-size: 0.85rem; color: #666; }
 .theme-dark .recent-log-muscles { color: #aaa; }
 .theme-dark .recent-log-item { background: #1e1e1e; border-color: #444; }
+
+/* BODYWEIGHT ENTRIES */
+.bw-entries { max-height: 150px; overflow-y: auto; }
+.bw-entry { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+.theme-dark .bw-entry { border-color: #333; }
+.bw-entry:last-child { border-bottom: none; }
+.text-red { color: #FF3333 !important; }

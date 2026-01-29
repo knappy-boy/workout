@@ -118,8 +118,46 @@ $("#btnLogBW").addEventListener("click", () => {
   DB.bodyweight.sort((a,b) => new Date(a.date) - new Date(b.date));
   saveDB();
   drawBodyweightChart();
+  renderBodyweightEntries();
   $("#bwInput").value = "";
 });
+
+function renderBodyweightEntries() {
+  const container = $("#bwEntries");
+  if (!container) return;
+  container.innerHTML = "";
+
+  // Show last 5 entries with delete option
+  const recent = DB.bodyweight.slice(-5).reverse();
+
+  if (recent.length === 0) {
+    container.innerHTML = '<p class="muted small">No entries yet</p>';
+    return;
+  }
+
+  recent.forEach((entry, idx) => {
+    const actualIdx = DB.bodyweight.length - 1 - idx;
+    const date = new Date(entry.date);
+    const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+
+    const div = document.createElement("div");
+    div.className = "bw-entry";
+    div.innerHTML = `
+      <span>${dateStr}</span>
+      <span>${entry.kg} kg</span>
+      <button class="btn-ghost small text-red" onclick="deleteBodyweightEntry(${actualIdx})">✕</button>
+    `;
+    container.appendChild(div);
+  });
+}
+
+function deleteBodyweightEntry(index) {
+  if (!confirm("Delete this bodyweight entry?")) return;
+  DB.bodyweight.splice(index, 1);
+  saveDB();
+  drawBodyweightChart();
+  renderBodyweightEntries();
+}
 
 function drawBodyweightChart() {
   const ctx = $("#bwChart").getContext("2d");
@@ -712,17 +750,22 @@ function deleteTemplate(id) {
 function renderHistory() {
   const cont = $("#historyLog");
   cont.innerHTML = "";
-  
-  DB.sessions.forEach(sess => {
+
+  if (DB.sessions.length === 0) {
+    cont.innerHTML = '<p class="muted">No workouts recorded yet.</p>';
+    return;
+  }
+
+  DB.sessions.forEach((sess, idx) => {
     const div = document.createElement("div");
     div.className = "history-entry";
-    
+
     const date = new Date(sess.start).toDateString();
-    
+
     let details = "";
     (sess.order || []).forEach(exId => {
        const sets = sess.entries[exId];
-       if(!sets) return;
+       if(!sets || sets.length === 0) return;
        const exName = DB.exercises[exId]?.name || "Unknown";
        let badges = sets.map(s => {
            if(s.w) return `<span class="set-tag">${s.w}kg × ${s.r}</span>`;
@@ -731,14 +774,25 @@ function renderHistory() {
        }).join("");
        details += `<div class="history-detail"><strong>${exName}</strong><br>${badges}</div>`;
     });
-    
+
     div.innerHTML = `
-      <div class="history-date">${date}</div>
+      <div class="row">
+        <div class="history-date">${date}</div>
+        <button class="btn-ghost small text-red" onclick="deleteWorkout(${idx})">DELETE</button>
+      </div>
       <div class="muted small">${(sess.order||[]).length} Exercises</div>
       ${details}
     `;
     cont.appendChild(div);
   });
+}
+
+function deleteWorkout(index) {
+  if (!confirm("Delete this workout? This cannot be undone.")) return;
+  DB.sessions.splice(index, 1);
+  saveDB();
+  renderHistory();
+  renderDashboard(); // Update recent logs too
 }
 
 // --- STATS CHART (Canvas) ---
@@ -774,8 +828,9 @@ function simpleLineChart(ctx, labels, dataPoints, color) {
 }
 
 function renderStats() {
-    // Draw bodyweight chart
+    // Draw bodyweight chart and entries
     drawBodyweightChart();
+    renderBodyweightEntries();
     $("#bwInput").value = "";
 
     // Populate select
