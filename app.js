@@ -546,7 +546,7 @@ $("#btnSaveEx").addEventListener("click", () => {
   const exerciseData = {
     name,
     type,
-    muscle: $("#newExMuscle").value,
+    muscle: type === 'cardio' ? null : $("#newExMuscle").value,
     equip: type === 'cardio' ? null : $("#newExEquip").value,
     increment: type === 'cardio' ? null : (parseFloat($("#newExInc").value) || 2.5),
     cardioMetric: type === 'cardio' ? ($("#newExCardioMetric").value.trim() || 'km') : null,
