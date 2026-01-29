@@ -1,5 +1,5 @@
 // Change this version string EVERY time you update your code
-const CACHE = "liftlog-ultra-v1";
+const CACHE = "liftlog-ultra-v2";
 
 const ASSETS = [
   "./",
@@ -11,7 +11,7 @@ const ASSETS = [
 
 self.addEventListener("install", (event) => {
   // Force the waiting service worker to become the active service worker
-  self.skipWaiting(); 
+  self.skipWaiting();
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
 });
 
@@ -33,13 +33,20 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  // Network-first strategy: try network, fall back to cache
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      // Return cached response if found, otherwise fetch from network
-      return cached || fetch(event.request).catch(() => {
-        // If both fail (offline & not cached), return main page
-        return caches.match("./");
-      });
-    })
+    fetch(event.request)
+      .then((response) => {
+        // Clone and cache the fresh response
+        const clone = response.clone();
+        caches.open(CACHE).then((cache) => cache.put(event.request, clone));
+        return response;
+      })
+      .catch(() => {
+        // Network failed, try cache
+        return caches.match(event.request).then((cached) => {
+          return cached || caches.match("./");
+        });
+      })
   );
 });
