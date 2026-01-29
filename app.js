@@ -278,7 +278,7 @@ const MUSCLE_COLORS = {
   Chest: "#E57373", Back: "#64B5F6", Shoulders: "#FFB74D",
   Biceps: "#BA68C8", Triceps: "#F06292", Forearms: "#CE93D8",
   Quads: "#81C784", Hamstrings: "#4DB6AC", Glutes: "#4DD0E1",
-  Core: "#90A4AE", Cardio: "#FFD54F", Other: "#78909C"
+  Calves: "#26A69A", Core: "#90A4AE", Cardio: "#FFD54F", Other: "#78909C"
 };
 
 function renderCalendar() {
@@ -380,17 +380,17 @@ function showDayDetails(iso, workouts) {
 $("#btnCloseDayModal").addEventListener("click", () => $("#dayModal").close());
 
 $("#btnPrevMonth").addEventListener("click", () => {
-  calendarDate.setMonth(calendarDate.getMonth() - 1);
+  calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth() - 1, 1);
   renderCalendar();
 });
 
 $("#btnNextMonth").addEventListener("click", () => {
-  calendarDate.setMonth(calendarDate.getMonth() + 1);
+  calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 1);
   renderCalendar();
 });
 
 // --- EXERCISES ---
-const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Forearms", "Quads", "Hamstrings", "Glutes", "Core", "Other"];
+const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Forearms", "Quads", "Hamstrings", "Glutes", "Calves", "Core", "Other"];
 const EXERCISE_TYPES = ["Strength", "Cardio"];
 
 // Migration map for old categories
