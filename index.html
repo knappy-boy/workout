@@ -15,7 +15,6 @@
     </div>
     <div class="controls">
       <button id="btnTheme" class="icon-btn" aria-label="Toggle Theme">◑</button>
-      <button id="btnSettings" class="icon-btn" aria-label="Settings">⚙</button>
     </div>
   </header>
 
@@ -117,10 +116,8 @@
             <button id="btnShowAddEx" class="btn-black small">+ NEW</button>
         </div>
         
-        <div class="filter-bar mt-2">
-             <select id="filterMuscle" class="neo-select"></select>
-             <input id="searchEx" class="neo-input" placeholder="Search...">
-        </div>
+        <div id="libraryTabs" class="picker-tabs mt-2"></div>
+        <input id="searchEx" class="neo-input full mt-2" placeholder="Search...">
 
         <div id="exerciseList" class="exercise-grid mt-2"></div>
       </div>
@@ -245,19 +242,6 @@
          <button id="pickerClose" class="btn-black full mt-2">CANCEL</button>
      </div>
   </div>
-
-  <dialog id="settingsModal" class="neo-modal">
-    <div class="modal-content">
-      <h3>SETTINGS</h3>
-      <div class="mt-2">
-        <p class="muted small">Current bodyweight: <strong id="settingsCurrentBW">--</strong> kg</p>
-        <p class="muted small">(Log bodyweight in Stats tab)</p>
-      </div>
-      <div class="row mt-4">
-        <button id="btnCloseSettings" class="btn-ghost">CLOSE</button>
-      </div>
-    </div>
-  </dialog>
 
   <dialog id="templateBuilderModal" class="neo-modal">
     <div class="modal-content">

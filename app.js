@@ -415,10 +415,11 @@ function migrateExerciseCategories() {
 }
 
 function renderExerciseLibrary() {
+  renderLibraryTabs();
+
   const container = $("#exerciseList");
   container.innerHTML = "";
 
-  const filter = $("#filterMuscle").value;
   const search = $("#searchEx").value.toLowerCase();
 
   const allExercises = Object.values(DB.exercises);
@@ -431,7 +432,12 @@ function renderExerciseLibrary() {
 
   const list = allExercises
     .filter(ex => {
-      if (filter && ex.muscle !== filter) return false;
+      // Filter by Cardio (type) or muscle group
+      if (_libraryFilter === "Cardio") {
+        if (ex.type !== "cardio") return false;
+      } else if (_libraryFilter !== "All") {
+        if (ex.muscle !== _libraryFilter) return false;
+      }
       if (search && !ex.name.toLowerCase().includes(search)) return false;
       return true;
     })
@@ -482,18 +488,16 @@ function renderExerciseLibrary() {
 // Populate Dropdowns
 function populateSelects() {
   const muscles = $("#newExMuscle");
-  const filter = $("#filterMuscle");
-  
-  [muscles, filter].forEach(sel => {
-    if(!sel) return;
-    sel.innerHTML = sel === filter ? '<option value="">All Muscles</option>' : '';
+
+  if (muscles) {
+    muscles.innerHTML = '';
     MUSCLE_GROUPS.forEach(m => {
       const opt = document.createElement("option");
       opt.value = m; opt.textContent = m;
-      sel.appendChild(opt);
+      muscles.appendChild(opt);
     });
-  });
-  
+  }
+
   $("#newExEquip").innerHTML = `
     <option value="barbell">Barbell</option>
     <option value="dumbbell">Dumbbell</option>
@@ -503,8 +507,49 @@ function populateSelects() {
   `;
 }
 
-// Library filter/search listeners
-$("#filterMuscle").addEventListener("change", renderExerciseLibrary);
+// Library filter state
+let _libraryFilter = "All";
+
+function renderLibraryTabs() {
+  const container = $("#libraryTabs");
+  if (!container) return;
+  container.innerHTML = "";
+
+  // All tab
+  const allTab = document.createElement("button");
+  allTab.className = `picker-tab ${_libraryFilter === "All" ? "active" : ""}`;
+  allTab.textContent = "All";
+  allTab.onclick = () => { _libraryFilter = "All"; renderLibraryTabs(); renderExerciseLibrary(); };
+  container.appendChild(allTab);
+
+  // Muscle group tabs
+  MUSCLE_GROUPS.forEach(muscle => {
+    const tab = document.createElement("button");
+    tab.className = `picker-tab ${_libraryFilter === muscle ? "active" : ""}`;
+    tab.textContent = muscle;
+    tab.style.borderColor = MUSCLE_COLORS[muscle] || "#ccc";
+    if (_libraryFilter === muscle) {
+      tab.style.background = MUSCLE_COLORS[muscle];
+      tab.style.color = "#fff";
+    }
+    tab.onclick = () => { _libraryFilter = muscle; renderLibraryTabs(); renderExerciseLibrary(); };
+    container.appendChild(tab);
+  });
+
+  // Cardio tab
+  const cardioTab = document.createElement("button");
+  cardioTab.className = `picker-tab ${_libraryFilter === "Cardio" ? "active" : ""}`;
+  cardioTab.textContent = "Cardio";
+  cardioTab.style.borderColor = MUSCLE_COLORS.Cardio;
+  if (_libraryFilter === "Cardio") {
+    cardioTab.style.background = MUSCLE_COLORS.Cardio;
+    cardioTab.style.color = "#000";
+  }
+  cardioTab.onclick = () => { _libraryFilter = "Cardio"; renderLibraryTabs(); renderExerciseLibrary(); };
+  container.appendChild(cardioTab);
+}
+
+// Library search listener
 $("#searchEx").addEventListener("input", renderExerciseLibrary);
 
 $("#btnShowAddEx").addEventListener("click", () => {
@@ -680,22 +725,61 @@ function startWorkout(template = null) {
 function renderActiveSession() {
   const list = $("#activeExerciseList");
   list.innerHTML = "";
-  
+
   ACTIVE_SESSION.order.forEach((exId, idx) => {
     const ex = DB.exercises[exId];
     if (!ex) return;
     const sets = ACTIVE_SESSION.entries[exId] || [];
     const isDone = sets.length > 0;
-    
+    const category = ex.type === 'cardio' ? 'Cardio' : (ex.muscle || 'Other');
+
     const div = document.createElement("div");
-    div.className = "neo-card bg-white mb-2 p-2";
+    div.className = "neo-card bg-white mb-2 p-2 draggable-exercise";
+    div.draggable = true;
+    div.dataset.idx = idx;
     div.innerHTML = `
       <div class="row">
-        <strong>${ex.name}</strong>
+        <div class="drag-handle">☰</div>
+        <strong class="flex-1">${ex.name} <span class="muscle-tag" style="background:${MUSCLE_COLORS[category]}">${category}</span></strong>
         <button class="btn-ghost" onclick="openLogger('${exId}')">${isDone ? 'EDIT' : 'LOG'}</button>
       </div>
       <div class="muted small">${sets.length} sets logged</div>
-      `;
+    `;
+
+    // Drag events
+    div.addEventListener("dragstart", (e) => {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", idx);
+      div.classList.add("dragging");
+    });
+
+    div.addEventListener("dragend", () => {
+      div.classList.remove("dragging");
+      document.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+    });
+
+    div.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      div.classList.add("drag-over");
+    });
+
+    div.addEventListener("dragleave", () => {
+      div.classList.remove("drag-over");
+    });
+
+    div.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const fromIdx = parseInt(e.dataTransfer.getData("text/plain"));
+      const toIdx = parseInt(div.dataset.idx);
+      if (fromIdx !== toIdx) {
+        const [moved] = ACTIVE_SESSION.order.splice(fromIdx, 1);
+        ACTIVE_SESSION.order.splice(toIdx, 0, moved);
+        renderActiveSession();
+      }
+      div.classList.remove("drag-over");
+    });
+
     list.appendChild(div);
   });
 }
@@ -1029,10 +1113,14 @@ function renderTemplateBuilderList() {
     const ex = DB.exercises[exId];
     if (!ex) return;
 
+    const category = ex.type === 'cardio' ? 'Cardio' : (ex.muscle || 'Other');
+    const color = MUSCLE_COLORS[category] || '#999';
+
     const div = document.createElement("div");
     div.className = "template-builder-item";
+    div.style.borderLeftColor = color;
     div.innerHTML = `
-      <span>${ex.name}</span>
+      <span>${ex.name} <span class="muscle-tag" style="background:${color}">${category}</span></span>
       <button class="btn-ghost small text-red" data-idx="${idx}">✕</button>
     `;
     div.querySelector("button").addEventListener("click", () => {
@@ -1598,17 +1686,6 @@ $("#btnToggleTimer").addEventListener("click", () => {
     btn.classList.add("expanded");
     btn.textContent = "▲";
   }
-});
-
-// Settings Modal
-$("#btnSettings").addEventListener("click", () => {
-  const latestBW = getLatestBodyweight();
-  $("#settingsCurrentBW").textContent = latestBW ? latestBW.toFixed(1) : "--";
-  $("#settingsModal").showModal();
-});
-
-$("#btnCloseSettings").addEventListener("click", () => {
-  $("#settingsModal").close();
 });
 
 // Helper to get latest bodyweight from chart data
