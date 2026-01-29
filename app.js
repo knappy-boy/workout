@@ -97,9 +97,14 @@ function renderRecentLogs() {
       if (ex && ex.muscle) muscles.add(ex.muscle);
     });
 
+    const templateBadge = sess.templateName
+      ? `<span class="template-badge">${sess.templateName}</span>`
+      : '<span class="template-badge freestyle">Freestyle</span>';
+
     div.innerHTML = `
       <div class="recent-log-date">${dateStr}</div>
       <div class="recent-log-info">${exerciseCount} exercises</div>
+      <div class="recent-log-meta">${templateBadge}</div>
       <div class="recent-log-muscles">${[...muscles].slice(0, 3).join(', ') || 'No data'}</div>
     `;
     container.appendChild(div);
@@ -120,7 +125,7 @@ $("#btnQuickStart").addEventListener("click", () => {
 function populateDashboardTemplates() {
   const sel = $("#dashboardTemplateSelect");
   if (!sel) return;
-  sel.innerHTML = '<option value="">Freestyle (no template)</option>';
+  sel.innerHTML = '<option value="">Freestyle</option>';
   Object.values(DB.templates).forEach(t => {
     sel.innerHTML += `<option value="${t.id}">${t.name}</option>`;
   });
@@ -271,9 +276,9 @@ let calendarDate = new Date();
 // Muscle group colors for calendar dots
 const MUSCLE_COLORS = {
   Chest: "#E57373", Back: "#64B5F6", Shoulders: "#FFB74D",
-  Biceps: "#BA68C8", Triceps: "#F06292", Quads: "#81C784",
-  Hamstrings: "#4DB6AC", Glutes: "#4DD0E1", Core: "#90A4AE",
-  Cardio: "#FFD54F", Other: "#78909C"
+  Biceps: "#BA68C8", Triceps: "#F06292", Forearms: "#CE93D8",
+  Quads: "#81C784", Hamstrings: "#4DB6AC", Glutes: "#4DD0E1",
+  Core: "#90A4AE", Cardio: "#FFD54F", Other: "#78909C"
 };
 
 function renderCalendar() {
@@ -385,7 +390,8 @@ $("#btnNextMonth").addEventListener("click", () => {
 });
 
 // --- EXERCISES ---
-const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Core", "Cardio", "Other"];
+const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Forearms", "Quads", "Hamstrings", "Glutes", "Core", "Other"];
+const EXERCISE_TYPES = ["Strength", "Cardio"];
 
 // Migration map for old categories
 const MUSCLE_MIGRATION = {
@@ -509,6 +515,7 @@ $("#btnShowAddEx").addEventListener("click", () => {
   $("#newExAssisted").checked = false;
   $("#strengthOptions").classList.remove("hidden");
   $("#cardioOptions").classList.add("hidden");
+  $("#muscleSelectWrapper").classList.remove("hidden");
   $("#addExModal").showModal();
 });
 
@@ -521,9 +528,11 @@ $("#newExType").addEventListener("change", (e) => {
    if(e.target.value === 'cardio') {
      $("#strengthOptions").classList.add("hidden");
      $("#cardioOptions").classList.remove("hidden");
+     $("#muscleSelectWrapper").classList.add("hidden");
    } else {
      $("#strengthOptions").classList.remove("hidden");
      $("#cardioOptions").classList.add("hidden");
+     $("#muscleSelectWrapper").classList.remove("hidden");
    }
 });
 
@@ -579,9 +588,11 @@ function editExercise(id) {
   if (ex.type === 'cardio') {
     $("#strengthOptions").classList.add("hidden");
     $("#cardioOptions").classList.remove("hidden");
+    $("#muscleSelectWrapper").classList.add("hidden");
   } else {
     $("#strengthOptions").classList.remove("hidden");
     $("#cardioOptions").classList.add("hidden");
+    $("#muscleSelectWrapper").classList.remove("hidden");
   }
 
   $("#addExModal").showModal();
@@ -950,48 +961,89 @@ function renderHistory() {
 
   const bw = getLatestBodyweight();
 
+  // Group sessions by month
+  const monthGroups = {};
   DB.sessions.forEach((sess, idx) => {
-    const div = document.createElement("div");
-    div.className = "history-entry";
+    const date = new Date(sess.start);
+    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const monthLabel = date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    if (!monthGroups[monthKey]) {
+      monthGroups[monthKey] = { label: monthLabel, sessions: [] };
+    }
+    monthGroups[monthKey].sessions.push({ sess, idx });
+  });
 
-    const date = new Date(sess.start).toDateString();
+  // Render each month group
+  const sortedMonths = Object.keys(monthGroups).sort().reverse();
+  sortedMonths.forEach((monthKey, monthIdx) => {
+    const group = monthGroups[monthKey];
+    const isCurrentMonth = monthIdx === 0;
 
-    let details = "";
-    (sess.order || []).forEach(exId => {
-       const sets = sess.entries[exId];
-       if(!sets || sets.length === 0) return;
-       const ex = DB.exercises[exId];
-       const exName = ex?.name || "Unknown";
-       let badges = sets.map(s => {
-           if(s.w) {
-             if (ex?.isAssisted && bw) {
-               const effective = bw - parseFloat(s.w);
-               return `<span class="set-tag">${effective}kg eff × ${s.r}</span>`;
+    const monthDiv = document.createElement("div");
+    monthDiv.className = "history-month";
+
+    const header = document.createElement("div");
+    header.className = "history-month-header";
+    header.innerHTML = `
+      <span>${group.label} (${group.sessions.length} workouts)</span>
+      <span class="month-toggle">${isCurrentMonth ? '▲' : '▼'}</span>
+    `;
+
+    const content = document.createElement("div");
+    content.className = `history-month-content ${isCurrentMonth ? 'expanded' : ''}`;
+
+    header.onclick = () => {
+      content.classList.toggle('expanded');
+      header.querySelector('.month-toggle').textContent = content.classList.contains('expanded') ? '▲' : '▼';
+    };
+
+    group.sessions.forEach(({ sess, idx }) => {
+      const div = document.createElement("div");
+      div.className = "history-entry";
+
+      const date = new Date(sess.start).toDateString();
+
+      let details = "";
+      (sess.order || []).forEach(exId => {
+         const sets = sess.entries[exId];
+         if(!sets || sets.length === 0) return;
+         const ex = DB.exercises[exId];
+         const exName = ex?.name || "Unknown";
+         let badges = sets.map(s => {
+             if(s.w) {
+               if (ex?.isAssisted && bw) {
+                 const effective = bw - parseFloat(s.w);
+                 return `<span class="set-tag">${effective}kg eff × ${s.r}</span>`;
+               }
+               return `<span class="set-tag">${s.w}kg × ${s.r}</span>`;
              }
-             return `<span class="set-tag">${s.w}kg × ${s.r}</span>`;
-           }
-           if(s.time) {
-             const metric = ex?.cardioMetric || 'km';
-             return `<span class="set-tag">${s.time}m / ${s.dist}${metric}</span>`;
-           }
-           return "";
-       }).join("");
-       details += `<div class="history-detail"><strong>${exName}</strong>${ex?.isAssisted ? ' <span class="muted small">(assisted)</span>' : ''}<br>${badges}</div>`;
+             if(s.time) {
+               const metric = ex?.cardioMetric || 'km';
+               return `<span class="set-tag">${s.time}m / ${s.dist}${metric}</span>`;
+             }
+             return "";
+         }).join("");
+         details += `<div class="history-detail"><strong>${exName}</strong>${ex?.isAssisted ? ' <span class="muted small">(assisted)</span>' : ''}<br>${badges}</div>`;
+      });
+
+      const templateBadge = sess.templateName
+        ? `<span class="template-badge">${sess.templateName}</span>`
+        : '<span class="template-badge freestyle">Freestyle</span>';
+
+      div.innerHTML = `
+        <div class="row">
+          <div class="history-date">${date}</div>
+          <button class="btn-ghost small text-red" onclick="deleteWorkout(${idx})">DELETE</button>
+        </div>
+        <div class="history-meta">${templateBadge} · ${(sess.order||[]).length} exercises</div>
+        ${details}
+      `;
+      content.appendChild(div);
     });
 
-    const templateBadge = sess.templateName
-      ? `<span class="template-badge">${sess.templateName}</span>`
-      : '<span class="template-badge freestyle">Freestyle</span>';
-
-    div.innerHTML = `
-      <div class="row">
-        <div class="history-date">${date}</div>
-        <button class="btn-ghost small text-red" onclick="deleteWorkout(${idx})">DELETE</button>
-      </div>
-      <div class="history-meta">${templateBadge} · ${(sess.order||[]).length} exercises</div>
-      ${details}
-    `;
-    cont.appendChild(div);
+    monthDiv.appendChild(header);
+    monthDiv.appendChild(content);
+    cont.appendChild(monthDiv);
   });
 }
 
@@ -1309,13 +1361,31 @@ function renderPickerTabs() {
     allTab.onclick = () => { _pickerFilter = "All"; renderPickerTabs(); renderPickerList(); };
     container.appendChild(allTab);
 
+    // Add muscle groups
     MUSCLE_GROUPS.forEach(muscle => {
         const tab = document.createElement("button");
         tab.className = `picker-tab ${_pickerFilter === muscle ? "active" : ""}`;
         tab.textContent = muscle;
+        tab.style.borderColor = MUSCLE_COLORS[muscle] || "#ccc";
+        if (_pickerFilter === muscle) {
+            tab.style.background = MUSCLE_COLORS[muscle];
+            tab.style.color = "#fff";
+        }
         tab.onclick = () => { _pickerFilter = muscle; renderPickerTabs(); renderPickerList(); };
         container.appendChild(tab);
     });
+
+    // Add Cardio tab (it's a type, not a muscle)
+    const cardioTab = document.createElement("button");
+    cardioTab.className = `picker-tab ${_pickerFilter === "Cardio" ? "active" : ""}`;
+    cardioTab.textContent = "Cardio";
+    cardioTab.style.borderColor = MUSCLE_COLORS.Cardio;
+    if (_pickerFilter === "Cardio") {
+        cardioTab.style.background = MUSCLE_COLORS.Cardio;
+        cardioTab.style.color = "#000";
+    }
+    cardioTab.onclick = () => { _pickerFilter = "Cardio"; renderPickerTabs(); renderPickerList(); };
+    container.appendChild(cardioTab);
 }
 
 $("#pickerSearch").addEventListener("input", renderPickerList);
@@ -1327,7 +1397,12 @@ function renderPickerList() {
 
     const filtered = Object.values(DB.exercises)
         .filter(ex => {
-            if (_pickerFilter !== "All" && ex.muscle !== _pickerFilter) return false;
+            // Filter by Cardio (type) or muscle group
+            if (_pickerFilter === "Cardio") {
+                if (ex.type !== "cardio") return false;
+            } else if (_pickerFilter !== "All") {
+                if (ex.muscle !== _pickerFilter) return false;
+            }
             if (q && !ex.name.toLowerCase().includes(q)) return false;
             return true;
         })
@@ -1340,7 +1415,8 @@ function renderPickerList() {
 
     filtered.forEach(ex => {
         const btn = document.createElement("div");
-        btn.className = `picker-item ex-cat-${ex.muscle || 'Other'}`;
+        const colorClass = ex.type === "cardio" ? "Cardio" : (ex.muscle || 'Other');
+        btn.className = `picker-item ex-cat-${colorClass}`;
         btn.textContent = ex.name;
         btn.onclick = () => {
             if(_pickerCallback) _pickerCallback(ex.id);

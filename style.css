@@ -112,6 +112,7 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .ex-cat-Shoulders { border-left: 5px solid #FFB74D; }
 .ex-cat-Biceps { border-left: 5px solid #BA68C8; }
 .ex-cat-Triceps { border-left: 5px solid #F06292; }
+.ex-cat-Forearms { border-left: 5px solid #CE93D8; }
 .ex-cat-Quads { border-left: 5px solid #81C784; }
 .ex-cat-Hamstrings { border-left: 5px solid #4DB6AC; }
 .ex-cat-Glutes { border-left: 5px solid #4DD0E1; }
@@ -120,6 +121,12 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .ex-cat-Other { border-left: 5px solid #78909C; }
 
 /* HISTORY STREAM */
+.history-month { margin-bottom: 15px; }
+.history-month-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; background: #1a1a1a; color: #fff; font-weight: bold; cursor: pointer; }
+.theme-dark .history-month-header { background: #333; }
+.month-toggle { font-size: 0.8rem; }
+.history-month-content { display: none; padding-top: 10px; }
+.history-month-content.expanded { display: block; }
 .history-entry { margin-bottom: 20px; border-left: 4px solid var(--black); padding-left: 15px; }
 .history-date { font-weight: 900; }
 .history-meta { font-size: 0.85rem; margin-bottom: 8px; color: #666; }
@@ -160,12 +167,11 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .cal-day.empty { background: transparent; border: none; cursor: default; }
 .cal-day.has-workout { background: #1a1a1a; color: #fff; font-weight: bold; }
 .cal-day.today { border: 3px solid var(--red) !important; }
-.theme-dark .cal-day.has-workout { background: #fff; color: #1a1a1a; }
 .cal-day-num { line-height: 1; }
 .cal-dots { display: flex; gap: 2px; margin-top: 2px; flex-wrap: wrap; justify-content: center; }
 .cal-dot { width: 6px; height: 6px; border-radius: 50%; }
-.theme-dark .cal-day { background: #1e1e1e; color: #fff; border-color: #444; }
-.theme-dark .cal-day.has-workout { background: #2a2a2a; }
+.theme-dark .cal-day { background: #2a2a2a; color: #fff; border-color: #444; }
+.theme-dark .cal-day.has-workout { background: #fff !important; color: #1a1a1a !important; }
 .day-exercise { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #eee; }
 .day-exercise:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
 .theme-dark .day-exercise { border-color: #333; }
@@ -200,9 +206,10 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 
 /* RECENT LOGS */
 .recent-logs { display: flex; flex-direction: column; gap: 10px; }
-.recent-log-item { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 10px; border: 2px solid var(--black); background: var(--gray); }
+.recent-log-item { display: grid; grid-template-columns: 1fr auto; gap: 5px; padding: 10px; border: 2px solid var(--black); background: var(--gray); }
 .recent-log-date { font-weight: 900; }
 .recent-log-info { text-align: right; font-weight: 600; }
+.recent-log-meta { grid-column: 1 / -1; }
 .recent-log-muscles { grid-column: 1 / -1; font-size: 0.85rem; color: #666; }
 .theme-dark .recent-log-muscles { color: #aaa; }
 .theme-dark .recent-log-item { background: #1e1e1e; border-color: #444; }
