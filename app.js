@@ -324,17 +324,23 @@ function renderCalendar() {
     if (dayWorkouts.length > 0) {
       div.classList.add("has-workout");
 
-      // Get unique muscle groups worked
+      // Get unique muscle groups worked (including cardio)
       const muscles = new Set();
       dayWorkouts.forEach(sess => {
         (sess.order || []).forEach(exId => {
           const ex = DB.exercises[exId];
-          if (ex && ex.muscle) muscles.add(ex.muscle);
+          if (ex) {
+            if (ex.type === 'cardio') {
+              muscles.add('Cardio');
+            } else if (ex.muscle) {
+              muscles.add(ex.muscle);
+            }
+          }
         });
       });
 
-      // Create dots container
-      const dotsHtml = [...muscles].slice(0, 4).map(m =>
+      // Create dots container - show all muscle groups
+      const dotsHtml = [...muscles].map(m =>
         `<span class="cal-dot" style="background:${MUSCLE_COLORS[m] || '#999'}"></span>`
       ).join("");
 
@@ -726,6 +732,8 @@ function startWorkout(template = null) {
 let _touchDragIdx = null;
 let _touchDragElement = null;
 let _touchDragClone = null;
+let _touchOffsetX = 0;
+let _touchOffsetY = 0;
 
 function renderActiveSession() {
   const list = $("#activeExerciseList");
@@ -794,6 +802,12 @@ function renderActiveSession() {
       _touchDragElement = div;
       div.classList.add("dragging");
 
+      // Calculate offset from touch point to element's top-left
+      const rect = div.getBoundingClientRect();
+      const touch = e.touches[0];
+      _touchOffsetX = touch.clientX - rect.left;
+      _touchOffsetY = touch.clientY - rect.top;
+
       // Create a visual clone that follows the finger
       _touchDragClone = div.cloneNode(true);
       _touchDragClone.classList.add("touch-drag-clone");
@@ -804,9 +818,9 @@ function renderActiveSession() {
       _touchDragClone.style.opacity = "0.8";
       document.body.appendChild(_touchDragClone);
 
-      const touch = e.touches[0];
-      _touchDragClone.style.left = (touch.clientX - div.offsetWidth / 2) + "px";
-      _touchDragClone.style.top = (touch.clientY - 20) + "px";
+      // Position clone at same visual position as original
+      _touchDragClone.style.left = rect.left + "px";
+      _touchDragClone.style.top = rect.top + "px";
     }, { passive: false });
 
     list.appendChild(div);
@@ -818,8 +832,9 @@ document.addEventListener("touchmove", (e) => {
   if (_touchDragClone === null) return;
 
   const touch = e.touches[0];
-  _touchDragClone.style.left = (touch.clientX - _touchDragClone.offsetWidth / 2) + "px";
-  _touchDragClone.style.top = (touch.clientY - 20) + "px";
+  // Maintain the same offset from finger to element
+  _touchDragClone.style.left = (touch.clientX - _touchOffsetX) + "px";
+  _touchDragClone.style.top = (touch.clientY - _touchOffsetY) + "px";
 
   // Find element under touch point
   _touchDragClone.style.display = "none";
