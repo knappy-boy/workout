@@ -48,12 +48,28 @@ const $$ = (s) => document.querySelectorAll(s);
 // --- TABS & NAVIGATION ---
 $$(".tab").forEach(btn => {
   btn.addEventListener("click", () => {
+    // Confirm if leaving workout tab with active session
+    const currentTab = $(".tab.active")?.dataset.tab;
+    if (currentTab === "workout" && ACTIVE_SESSION && btn.dataset.tab !== "workout") {
+      if (!confirm("You have an active workout. Leave this tab?")) {
+        return;
+      }
+    }
+
     $$(".tab").forEach(b => b.classList.remove("active"));
     $$(".panel").forEach(p => p.classList.remove("active"));
     btn.classList.add("active");
     $("#tab-" + btn.dataset.tab).classList.add("active");
     renderCurrentTab(btn.dataset.tab);
   });
+});
+
+// Warn before closing page with active workout
+window.addEventListener("beforeunload", (e) => {
+  if (ACTIVE_SESSION) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
 });
 
 function renderCurrentTab(tab) {
@@ -281,6 +297,16 @@ const MUSCLE_COLORS = {
   Quads: "#81C784", Hamstrings: "#4DB6AC", Glutes: "#4DD0E1",
   Calves: "#26A69A", Core: "#90A4AE", Cardio: "#FFD54F", Other: "#78909C"
 };
+
+// Helper to determine if text should be dark or light based on background
+function getContrastTextColor(hexColor) {
+  const r = parseInt(hexColor.slice(1, 3), 16);
+  const g = parseInt(hexColor.slice(3, 5), 16);
+  const b = parseInt(hexColor.slice(5, 7), 16);
+  // Calculate luminance
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.5 ? "#000" : "#fff";
+}
 
 function renderCalendar() {
   const grid = $("#calendarGrid");
@@ -550,10 +576,11 @@ function renderLibraryTabs() {
     const tab = document.createElement("button");
     tab.className = `picker-tab ${_libraryFilter === muscle ? "active" : ""}`;
     tab.textContent = muscle;
-    tab.style.borderColor = MUSCLE_COLORS[muscle] || "#ccc";
+    const color = MUSCLE_COLORS[muscle] || "#ccc";
+    tab.style.borderColor = color;
     if (_libraryFilter === muscle) {
-      tab.style.background = MUSCLE_COLORS[muscle];
-      tab.style.color = "#fff";
+      tab.style.background = color;
+      tab.style.color = getContrastTextColor(color);
     }
     tab.onclick = () => { _libraryFilter = muscle; renderLibraryTabs(); renderExerciseLibrary(); };
     container.appendChild(tab);
@@ -563,10 +590,11 @@ function renderLibraryTabs() {
   const cardioTab = document.createElement("button");
   cardioTab.className = `picker-tab ${_libraryFilter === "Cardio" ? "active" : ""}`;
   cardioTab.textContent = "Cardio";
-  cardioTab.style.borderColor = MUSCLE_COLORS.Cardio;
+  const cardioColor = MUSCLE_COLORS.Cardio;
+  cardioTab.style.borderColor = cardioColor;
   if (_libraryFilter === "Cardio") {
-    cardioTab.style.background = MUSCLE_COLORS.Cardio;
-    cardioTab.style.color = "#000";
+    cardioTab.style.background = cardioColor;
+    cardioTab.style.color = getContrastTextColor(cardioColor);
   }
   cardioTab.onclick = () => { _libraryFilter = "Cardio"; renderLibraryTabs(); renderExerciseLibrary(); };
   container.appendChild(cardioTab);
@@ -720,7 +748,10 @@ function startTimer() {
     const diff = Math.floor((Date.now() - start) / 1000);
     const m = Math.floor(diff / 60).toString().padStart(2, '0');
     const s = (diff % 60).toString().padStart(2, '0');
-    $("#workoutTimer").textContent = `${m}:${s}`;
+    const timeStr = `${m}:${s}`;
+    // Update both timer displays
+    $("#workoutTimer").textContent = timeStr;
+    $("#workoutTimerMini").textContent = timeStr;
   }, 1000);
 }
 
@@ -1660,7 +1691,8 @@ function updateStatsChart() {
 const DATA_VERSION = 1;
 
 $("#btnExportCSV").addEventListener("click", () => {
-    let csv = "Date,Exercise,Set,Weight/Time,Reps/Dist\n";
+    // Workout data
+    let csv = "=== WORKOUT DATA ===\nDate,Exercise,Set,Weight/Time,Reps/Dist\n";
     DB.sessions.forEach(s => {
         const date = s.start.split("T")[0];
         (s.order || []).forEach(exId => {
@@ -1671,6 +1703,13 @@ $("#btnExportCSV").addEventListener("click", () => {
                 csv += `${date},${exName},${i+1},${v1},${v2}\n`;
             });
         });
+    });
+
+    // Bodyweight data
+    csv += "\n=== BODYWEIGHT DATA ===\nDate,Weight (kg)\n";
+    DB.bodyweight.forEach(bw => {
+        const date = bw.date.split("T")[0];
+        csv += `${date},${bw.kg}\n`;
     });
 
     const blob = new Blob([csv], {type: "text/csv"});
@@ -1777,10 +1816,11 @@ function renderPickerTabs() {
         const tab = document.createElement("button");
         tab.className = `picker-tab ${_pickerFilter === muscle ? "active" : ""}`;
         tab.textContent = muscle;
-        tab.style.borderColor = MUSCLE_COLORS[muscle] || "#ccc";
+        const color = MUSCLE_COLORS[muscle] || "#ccc";
+        tab.style.borderColor = color;
         if (_pickerFilter === muscle) {
-            tab.style.background = MUSCLE_COLORS[muscle];
-            tab.style.color = "#fff";
+            tab.style.background = color;
+            tab.style.color = getContrastTextColor(color);
         }
         tab.onclick = () => { _pickerFilter = muscle; renderPickerTabs(); renderPickerList(); };
         container.appendChild(tab);
@@ -1790,10 +1830,11 @@ function renderPickerTabs() {
     const cardioTab = document.createElement("button");
     cardioTab.className = `picker-tab ${_pickerFilter === "Cardio" ? "active" : ""}`;
     cardioTab.textContent = "Cardio";
-    cardioTab.style.borderColor = MUSCLE_COLORS.Cardio;
+    const cardioColor = MUSCLE_COLORS.Cardio;
+    cardioTab.style.borderColor = cardioColor;
     if (_pickerFilter === "Cardio") {
-        cardioTab.style.background = MUSCLE_COLORS.Cardio;
-        cardioTab.style.color = "#000";
+        cardioTab.style.background = cardioColor;
+        cardioTab.style.color = getContrastTextColor(cardioColor);
     }
     cardioTab.onclick = () => { _pickerFilter = "Cardio"; renderPickerTabs(); renderPickerList(); };
     container.appendChild(cardioTab);
@@ -1852,19 +1893,32 @@ $("#btnTheme").addEventListener("click", () => {
    saveDB();
 });
 
-// Timer Toggle
-$("#btnToggleTimer").addEventListener("click", () => {
-  const timer = $("#timerCollapsible");
-  const btn = $("#btnToggleTimer");
-  if (timer.classList.contains("timer-expanded")) {
-    timer.classList.remove("timer-expanded");
-    btn.classList.remove("expanded");
-    btn.textContent = "▼";
-  } else {
-    timer.classList.add("timer-expanded");
-    btn.classList.add("expanded");
-    btn.textContent = "▲";
-  }
+// Timer Toggle - Expand from minimal bar to full card
+$("#btnToggleTimerExpand").addEventListener("click", () => {
+  $("#timerBarMinimal").classList.add("hidden");
+  $("#timerCardFull").classList.remove("hidden");
+});
+
+// Timer Toggle - Collapse from full card to minimal bar
+$("#btnToggleTimerCollapse").addEventListener("click", () => {
+  $("#timerCardFull").classList.add("hidden");
+  $("#timerBarMinimal").classList.remove("hidden");
+});
+
+// Both finish buttons do the same thing
+$("#btnFinishWorkoutMini").addEventListener("click", () => {
+  $("#btnFinishWorkout").click();
+});
+
+// Templates section collapsible toggle
+$("#templatesHeader").addEventListener("click", (e) => {
+  // Don't toggle if clicking the NEW button
+  if (e.target.id === "btnNewTemplate") return;
+
+  const content = $("#templatesContent");
+  const icon = $("#templatesToggle");
+  content.classList.toggle("collapsed");
+  icon.classList.toggle("collapsed");
 });
 
 // Helper to get latest bodyweight from chart data

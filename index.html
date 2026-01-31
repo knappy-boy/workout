@@ -59,20 +59,26 @@
 
     <section id="tab-workout" class="panel">
       <div id="activeWorkoutPanel" class="hidden">
-        <div class="neo-card bg-red text-white mb-4">
+        <!-- Minimal timer bar (shown when collapsed) -->
+        <div id="timerBarMinimal" class="timer-bar-minimal mb-2">
+          <button id="btnToggleTimerExpand" class="btn-ghost-mini">▼</button>
+          <span id="workoutTimerMini" class="timer-mini">00:00</span>
+          <button id="btnFinishWorkoutMini" class="btn-white-small">FINISH</button>
+        </div>
+
+        <!-- Full timer card (shown when expanded) -->
+        <div id="timerCardFull" class="neo-card bg-red text-white mb-4 hidden">
           <div class="row">
-            <button id="btnToggleTimer" class="btn-ghost text-white timer-toggle">▼</button>
+            <button id="btnToggleTimerCollapse" class="btn-ghost text-white timer-toggle">▲</button>
+            <h2 id="workoutTimer" class="timer-large">00:00</h2>
             <button id="btnFinishWorkout" class="btn-white">FINISH</button>
           </div>
-          <div id="timerCollapsible" class="timer-collapsed">
-            <h2 id="workoutTimer">00:00</h2>
-            <div class="muted-white" id="workoutMeta"></div>
-          </div>
+          <div class="muted-white text-center" id="workoutMeta"></div>
         </div>
 
         <div class="row mb-2">
            <button id="btnAddExToWorkout" class="btn-black full">+ EXERCISE</button>
-           <button id="btnSaveTemplate" class="btn-ghost icon-btn">💾</button>
+           <button id="btnSaveTemplate" class="btn-black-outline icon-btn" title="Save as template">💾</button>
         </div>
 
         <div id="activeExerciseList" class="stack-list"></div>
@@ -93,11 +99,13 @@
         </div>
 
         <div class="neo-card bg-white mt-4">
-          <div class="row">
-             <h3>MY TEMPLATES</h3>
+          <div class="row collapsible-header" id="templatesHeader">
+             <h3>MY TEMPLATES <span id="templatesToggle" class="toggle-icon">▼</span></h3>
              <button id="btnNewTemplate" class="btn-small">NEW</button>
           </div>
-          <ul id="templateList" class="simple-list mt-2"></ul>
+          <div id="templatesContent" class="collapsible-content">
+            <ul id="templateList" class="simple-list mt-2"></ul>
+          </div>
         </div>
       </div>
     </section>
