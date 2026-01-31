@@ -1,5 +1,5 @@
 // Change this version string EVERY time you update your code
-const CACHE = "liftlog-ultra-v32";
+const CACHE = "liftlog-ultra-v33";
 
 const ASSETS = [
   "./",
@@ -9,7 +9,8 @@ const ASSETS = [
   "./manifest.json",
   "./icon-192.svg",
   "./icon-512.svg",
-  "./icon-maskable.svg"
+  "./icon-maskable.svg",
+  "./apple-touch-icon.png"
 ];
 
 self.addEventListener("install", (event) => {

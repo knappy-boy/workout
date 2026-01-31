@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <title>LIFTLOG ULTRA</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="icon-192.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="theme-light">
@@ -159,7 +159,7 @@
         </div>
         <div class="bw-zoom-hint muted small mt-1">Pinch or scroll to zoom • Drag to pan</div>
         <div class="row mt-2">
-          <input id="bwInput" type="number" step="0.1" inputmode="decimal" placeholder="Weight">
+          <input id="bwInput" type="number" step="0.1" inputmode="decimal" placeholder="Weight" autocomplete="off">
           <span id="bwUnitLabel" class="unit-label">kg</span>
           <button id="btnLogBW" class="btn-black">LOG</button>
         </div>
@@ -178,8 +178,11 @@
         <div class="chart-container large">
           <canvas id="progChart"></canvas>
         </div>
-        <div id="exerciseHistory" class="exercise-history mt-4"></div>
-        <div id="exerciseHistoryToggle"></div>
+        <div class="exercise-history-wrapper mt-4">
+          <h3 class="exercise-history-header">LIFT HISTORY</h3>
+          <div id="exerciseHistory" class="exercise-history"></div>
+          <div id="exerciseHistoryToggle"></div>
+        </div>
       </div>
 
       <div class="neo-card bg-white mt-4">

@@ -234,7 +234,11 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .theme-dark .day-exercise { border-color: #333; }
 
 /* EXERCISE HISTORY IN STATS */
-.exercise-history { max-height: 300px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.exercise-history-wrapper { border: 2px solid #eee; border-radius: 4px; }
+.theme-dark .exercise-history-wrapper { border-color: #333; }
+.exercise-history-header { padding: 10px; margin: 0; background: var(--gray); border-bottom: 2px solid #eee; position: sticky; top: 0; }
+.theme-dark .exercise-history-header { border-color: #333; }
+.exercise-history { max-height: 250px; overflow-y: scroll; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 0 10px; touch-action: pan-y; }
 .ex-history-item { padding: 8px 0; border-bottom: 1px solid #eee; display: grid; grid-template-columns: 85px 1fr; gap: 8px; align-items: baseline; }
 .ex-history-item:last-child { border-bottom: none; }
 .theme-dark .ex-history-item { border-color: #333; }

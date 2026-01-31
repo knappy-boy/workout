@@ -1256,6 +1256,7 @@ function openLogger(exId) {
   }
   
   $("#logModal").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
 }
 
 function addLogRow(ex, data = null, isGhost = false, prevWeight = null) {
@@ -1378,10 +1379,22 @@ $("#btnSaveLog").addEventListener("click", () => {
   
   ACTIVE_SESSION.entries[CURRENT_LOG_EX] = entries;
   $("#logModal").classList.add("hidden");
+  document.body.style.overflow = "";
   renderActiveSession();
 });
 
-$("#logModalClose").addEventListener("click", () => $("#logModal").classList.add("hidden"));
+$("#logModalClose").addEventListener("click", () => {
+  $("#logModal").classList.add("hidden");
+  document.body.style.overflow = "";
+});
+
+// Close log modal when clicking outside drawer
+$("#logModal").addEventListener("click", (e) => {
+  if (e.target === $("#logModal")) {
+    $("#logModal").classList.add("hidden");
+    document.body.style.overflow = "";
+  }
+});
 
 // Helper: Find last session
 function findLastSessionWithExercise(exId) {
@@ -1656,7 +1669,9 @@ function renderHistory() {
              }
              return "";
          }).join("");
-         details += `<div class="history-detail"><strong>${exName}</strong>${ex?.isAssisted ? ' <span class="muted small">(assisted)</span>' : ''}<br>${badges}</div>`;
+         const muscle = ex?.type === 'cardio' ? 'Cardio' : (ex?.muscle || 'Other');
+         const muscleColor = MUSCLE_COLORS[muscle] || '#999';
+         details += `<div class="history-detail" style="border-left: 4px solid ${muscleColor}; padding-left: 8px;"><strong>${exName}</strong>${ex?.isAssisted ? ' <span class="muted small">(assisted)</span>' : ''}<br>${badges}</div>`;
       });
 
       const templateBadge = sess.templateName
@@ -1811,16 +1826,20 @@ function updateStatsChart() {
 
     // Render history list (newest first)
     const toggleContainer = $("#exerciseHistoryToggle");
+    const historyWrapper = document.querySelector(".exercise-history-wrapper");
+    const historyHeader = document.querySelector(".exercise-history-header");
     if (historyContainer) {
         if (historyForDisplay.length === 0) {
-            historyContainer.innerHTML = '<p class="muted">No history for this exercise yet.</p>';
+            historyContainer.innerHTML = '<p class="muted" style="padding: 10px;">No history for this exercise yet.</p>';
             if (toggleContainer) toggleContainer.innerHTML = '';
+            if (historyHeader) historyHeader.style.display = 'none';
         } else {
+            if (historyHeader) historyHeader.style.display = 'block';
             const showAll = _exerciseHistoryExpanded;
             const itemsToShow = showAll ? historyForDisplay : historyForDisplay.slice(0, 3);
             const remaining = historyForDisplay.length - 3;
 
-            let html = '<h3 class="mb-2">LIFT HISTORY</h3>';
+            let html = '';
             itemsToShow.forEach(h => {
                 const date = new Date(h.date);
                 const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });

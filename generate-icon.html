@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Generate App Icon</title>
+  <style>
+    body { font-family: system-ui; padding: 20px; text-align: center; }
+    canvas { border: 1px solid #ccc; margin: 20px; }
+    button { padding: 15px 30px; font-size: 18px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>LiftLog Icon Generator</h1>
+  <p>Click the button to download the icon, then replace apple-touch-icon.png in your project folder.</p>
+
+  <canvas id="iconCanvas" width="180" height="180"></canvas>
+  <br>
+  <button onclick="downloadIcon()">Download apple-touch-icon.png</button>
+
+  <script>
+    const canvas = document.getElementById('iconCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // White background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 180, 180);
+
+    // LIFT text (filled)
+    ctx.font = 'italic 900 48px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillText('LIFT', 90, 78);
+
+    // LOG text (outline only)
+    ctx.strokeStyle = '#1a1a1a';
+    ctx.lineWidth = 2;
+    ctx.strokeText('LOG', 90, 128);
+
+    function downloadIcon() {
+      const link = document.createElement('a');
+      link.download = 'apple-touch-icon.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    }
+  </script>
+</body>
+</html>
