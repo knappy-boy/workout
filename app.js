@@ -89,6 +89,7 @@ function renderRecentLogs() {
     const date = new Date(sess.start);
     const dateStr = date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
     const exerciseCount = (sess.order || []).length;
+    const exerciseWord = exerciseCount === 1 ? 'exercise' : 'exercises';
 
     // Get muscle groups worked
     const muscles = new Set();
@@ -103,7 +104,7 @@ function renderRecentLogs() {
 
     div.innerHTML = `
       <div class="recent-log-date">${dateStr}</div>
-      <div class="recent-log-info">${exerciseCount} exercises</div>
+      <div class="recent-log-info">${exerciseCount} ${exerciseWord}</div>
       <div class="recent-log-meta">${templateBadge}</div>
       <div class="recent-log-muscles">${[...muscles].slice(0, 3).join(', ') || 'No data'}</div>
     `;
@@ -1699,6 +1700,11 @@ $("#fileRestore").addEventListener("change", (e) => {
             if (!DB.bodyweight) DB.bodyweight = [];
             if (!DB.templates) DB.templates = {};
             if (!DB.user) DB.user = { theme: "light" };
+
+            // Sort sessions by date (newest first)
+            if (DB.sessions && DB.sessions.length > 0) {
+              DB.sessions.sort((a, b) => new Date(b.start) - new Date(a.start));
+            }
 
             saveDB();
             migrateExerciseCategories();
