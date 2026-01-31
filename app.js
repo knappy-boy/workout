@@ -590,12 +590,23 @@ $("#btnShowAddEx").addEventListener("click", () => {
   $("#cardioOptions").classList.add("hidden");
   $("#muscleSelectWrapper").classList.remove("hidden");
   $("#btnDeleteEx").classList.add("hidden"); // Hide delete for new exercise
-  $("#addExModal").showModal();
+  $("#addExModal").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
 });
 
 $("#btnCloseExModal").addEventListener("click", () => {
   EDITING_EXERCISE_ID = null;
-  $("#addExModal").close();
+  $("#addExModal").classList.add("hidden");
+  document.body.style.overflow = "";
+});
+
+// Close exercise modal when clicking outside
+$("#addExModal").addEventListener("click", (e) => {
+  if (e.target === $("#addExModal")) {
+    EDITING_EXERCISE_ID = null;
+    $("#addExModal").classList.add("hidden");
+    document.body.style.overflow = "";
+  }
 });
 
 $("#newExType").addEventListener("change", (e) => {
@@ -638,7 +649,8 @@ $("#btnSaveEx").addEventListener("click", () => {
 
   EDITING_EXERCISE_ID = null;
   saveDB();
-  $("#addExModal").close();
+  $("#addExModal").classList.add("hidden");
+  document.body.style.overflow = "";
   renderExerciseLibrary();
 });
 
@@ -670,7 +682,8 @@ function editExercise(id) {
   }
 
   $("#btnDeleteEx").classList.remove("hidden"); // Show delete for existing exercise
-  $("#addExModal").showModal();
+  $("#addExModal").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
 }
 
 $("#btnDeleteEx").addEventListener("click", () => {
@@ -680,7 +693,8 @@ $("#btnDeleteEx").addEventListener("click", () => {
   delete DB.exercises[EDITING_EXERCISE_ID];
   EDITING_EXERCISE_ID = null;
   saveDB();
-  $("#addExModal").close();
+  $("#addExModal").classList.add("hidden");
+  document.body.style.overflow = "";
   renderExerciseLibrary();
 });
 
@@ -1197,8 +1211,10 @@ $("#btnNewTemplate").addEventListener("click", () => {
   _templateBuilderExercises = [];
   _editingTemplateId = null;
   $("#templateBuilderName").value = "";
+  $("#templateBuilderTitle").textContent = "CREATE TEMPLATE";
   renderTemplateBuilderList();
-  $("#templateBuilderModal").showModal();
+  $("#templateBuilderModal").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
 });
 
 function editTemplate(id) {
@@ -1208,13 +1224,15 @@ function editTemplate(id) {
   _editingTemplateId = id;
   _templateBuilderExercises = template.exercises.map(e => e.exId);
   $("#templateBuilderName").value = template.name;
+  $("#templateBuilderTitle").textContent = "EDIT TEMPLATE";
   renderTemplateBuilderList();
-  $("#templateBuilderModal").showModal();
+  $("#templateBuilderModal").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
 }
 
 $("#btnAddExToTemplate").addEventListener("click", () => {
-  // Temporarily close the template builder so picker appears on top
-  $("#templateBuilderModal").close();
+  // Temporarily hide the template builder so picker appears on top
+  $("#templateBuilderModal").classList.add("hidden");
 
   openExercisePicker(
     // On select callback
@@ -1224,13 +1242,13 @@ $("#btnAddExToTemplate").addEventListener("click", () => {
       }
       // Reopen template builder after selection
       renderTemplateBuilderList();
-      $("#templateBuilderModal").showModal();
+      $("#templateBuilderModal").classList.remove("hidden");
     },
     // On cancel callback
     () => {
       // Reopen template builder if picker was cancelled
       renderTemplateBuilderList();
-      $("#templateBuilderModal").showModal();
+      $("#templateBuilderModal").classList.remove("hidden");
     }
   );
 });
@@ -1267,7 +1285,16 @@ function renderTemplateBuilderList() {
 }
 
 $("#btnCloseTemplateBuilder").addEventListener("click", () => {
-  $("#templateBuilderModal").close();
+  $("#templateBuilderModal").classList.add("hidden");
+  document.body.style.overflow = "";
+});
+
+// Close template builder when clicking outside
+$("#templateBuilderModal").addEventListener("click", (e) => {
+  if (e.target === $("#templateBuilderModal")) {
+    $("#templateBuilderModal").classList.add("hidden");
+    document.body.style.overflow = "";
+  }
 });
 
 $("#btnSaveTemplateBuilder").addEventListener("click", () => {
@@ -1295,7 +1322,8 @@ $("#btnSaveTemplateBuilder").addEventListener("click", () => {
 
   saveDB();
   _editingTemplateId = null;
-  $("#templateBuilderModal").close();
+  $("#templateBuilderModal").classList.add("hidden");
+  document.body.style.overflow = "";
   renderTemplates();
 });
 

@@ -115,45 +115,6 @@
         <div id="exerciseList" class="exercise-grid mt-2"></div>
       </div>
 
-      <dialog id="addExModal" class="neo-modal">
-        <div class="modal-content">
-          <h3 id="exModalTitle">NEW EXERCISE</h3>
-          <label>Name <input id="newExName" class="neo-input"></label>
-          <div class="row gap-2">
-            <label>Type
-                <select id="newExType" class="neo-select">
-                    <option value="strength">Strength</option>
-                    <option value="cardio">Cardio</option>
-                </select>
-            </label>
-            <label id="muscleSelectWrapper">Muscle
-                <select id="newExMuscle" class="neo-select"></select>
-            </label>
-          </div>
-          <div id="strengthOptions">
-            <div class="grid-2">
-              <label>Equip <select id="newExEquip" class="neo-select"></select></label>
-              <label>Increment <input id="newExInc" type="number" value="2.5" class="neo-input"></label>
-            </div>
-            <label class="checkbox-label mt-2">
-              <input type="checkbox" id="newExAssisted">
-              Assisted exercise (e.g. pull-up with band)
-            </label>
-            <p class="muted small">For assisted exercises, you'll log the assistance weight and we'll calculate effective weight</p>
-          </div>
-          <div id="cardioOptions" class="hidden mt-2">
-             <label>Secondary metric name
-               <input id="newExCardioMetric" class="neo-input" placeholder="e.g. floors, km, laps">
-             </label>
-             <p class="muted small">Leave blank for default (km)</p>
-          </div>
-          <div class="row mt-4">
-            <button id="btnCloseExModal" class="btn-ghost">CANCEL</button>
-            <button id="btnDeleteEx" class="btn-ghost text-red hidden">DELETE</button>
-            <button id="btnSaveEx" class="btn-red">SAVE</button>
-          </div>
-        </div>
-      </dialog>
     </section>
 
     <section id="tab-history" class="panel">
@@ -236,9 +197,49 @@
      </div>
   </div>
 
-  <dialog id="templateBuilderModal" class="neo-modal">
-    <div class="modal-content">
-      <h3>CREATE TEMPLATE</h3>
+  <div id="addExModal" class="overlay hidden">
+    <div class="modal-box">
+      <h3 id="exModalTitle">NEW EXERCISE</h3>
+      <label>Name <input id="newExName" class="neo-input"></label>
+      <div class="row gap-2">
+        <label>Type
+            <select id="newExType" class="neo-select">
+                <option value="strength">Strength</option>
+                <option value="cardio">Cardio</option>
+            </select>
+        </label>
+        <label id="muscleSelectWrapper">Muscle
+            <select id="newExMuscle" class="neo-select"></select>
+        </label>
+      </div>
+      <div id="strengthOptions">
+        <div class="grid-2">
+          <label>Equip <select id="newExEquip" class="neo-select"></select></label>
+          <label>Increment <input id="newExInc" type="number" value="2.5" class="neo-input"></label>
+        </div>
+        <label class="checkbox-label mt-2">
+          <input type="checkbox" id="newExAssisted">
+          Assisted exercise (e.g. pull-up with band)
+        </label>
+        <p class="muted small">For assisted exercises, you'll log the assistance weight and we'll calculate effective weight</p>
+      </div>
+      <div id="cardioOptions" class="hidden mt-2">
+         <label>Secondary metric name
+           <input id="newExCardioMetric" class="neo-input" placeholder="e.g. floors, km, laps">
+         </label>
+         <p class="muted small">Leave blank for default (km)</p>
+      </div>
+      <div class="row mt-4">
+        <button id="btnCloseExModal" class="btn-ghost">CANCEL</button>
+        <button id="btnDeleteEx" class="btn-ghost text-red hidden">DELETE</button>
+        <button id="btnSaveEx" class="btn-red">SAVE</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="templateBuilderModal" class="overlay hidden">
+    <div class="modal-box">
+      <h3 id="templateBuilderTitle">CREATE TEMPLATE</h3>
       <label class="mt-2">Template Name
         <input id="templateBuilderName" class="neo-input" placeholder="e.g. Push Day">
       </label>
@@ -254,7 +255,7 @@
         <button id="btnSaveTemplateBuilder" class="btn-red">SAVE</button>
       </div>
     </div>
-  </dialog>
+  </div>
 
   <div id="dayModal" class="overlay hidden">
     <div class="day-modal-box">

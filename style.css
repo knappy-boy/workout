@@ -178,18 +178,21 @@ dialog.neo-modal[open] {
 dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .modal-content { padding: 20px; overflow-y: auto; flex: 1; max-height: calc(80vh - 40px); }
 
-/* Day modal - using overlay pattern for iOS compatibility */
-#dayModal {
+/* Modal boxes - using overlay pattern for iOS compatibility */
+#dayModal,
+#addExModal,
+#templateBuilderModal {
   align-items: center;
   justify-content: center;
 }
-.day-modal-box {
+.day-modal-box,
+.modal-box {
   background: var(--white);
   border: var(--border);
   box-shadow: var(--shadow);
   width: 90%;
   max-width: 400px;
-  max-height: 70vh;
+  max-height: 80vh;
   padding: 20px;
   overflow-y: auto;
   color: var(--black);
