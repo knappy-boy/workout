@@ -48,28 +48,12 @@ const $$ = (s) => document.querySelectorAll(s);
 // --- TABS & NAVIGATION ---
 $$(".tab").forEach(btn => {
   btn.addEventListener("click", () => {
-    // Confirm if leaving workout tab with active session
-    const currentTab = $(".tab.active")?.dataset.tab;
-    if (currentTab === "workout" && ACTIVE_SESSION && btn.dataset.tab !== "workout") {
-      if (!confirm("You have an active workout. Leave this tab?")) {
-        return;
-      }
-    }
-
     $$(".tab").forEach(b => b.classList.remove("active"));
     $$(".panel").forEach(p => p.classList.remove("active"));
     btn.classList.add("active");
     $("#tab-" + btn.dataset.tab).classList.add("active");
     renderCurrentTab(btn.dataset.tab);
   });
-});
-
-// Warn before closing page with active workout
-window.addEventListener("beforeunload", (e) => {
-  if (ACTIVE_SESSION) {
-    e.preventDefault();
-    e.returnValue = "";
-  }
 });
 
 function renderCurrentTab(tab) {
@@ -298,15 +282,6 @@ const MUSCLE_COLORS = {
   Calves: "#26A69A", Core: "#90A4AE", Cardio: "#FFD54F", Other: "#78909C"
 };
 
-// Helper to determine if text should be dark or light based on background
-function getContrastTextColor(hexColor) {
-  const r = parseInt(hexColor.slice(1, 3), 16);
-  const g = parseInt(hexColor.slice(3, 5), 16);
-  const b = parseInt(hexColor.slice(5, 7), 16);
-  // Calculate luminance
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance > 0.5 ? "#000" : "#fff";
-}
 
 function renderCalendar() {
   const grid = $("#calendarGrid");
@@ -580,7 +555,7 @@ function renderLibraryTabs() {
     tab.style.borderColor = color;
     if (_libraryFilter === muscle) {
       tab.style.background = color;
-      tab.style.color = getContrastTextColor(color);
+      tab.style.color = "#000"; // Always black text when active
     }
     tab.onclick = () => { _libraryFilter = muscle; renderLibraryTabs(); renderExerciseLibrary(); };
     container.appendChild(tab);
@@ -594,7 +569,7 @@ function renderLibraryTabs() {
   cardioTab.style.borderColor = cardioColor;
   if (_libraryFilter === "Cardio") {
     cardioTab.style.background = cardioColor;
-    cardioTab.style.color = getContrastTextColor(cardioColor);
+    cardioTab.style.color = "#000";
   }
   cardioTab.onclick = () => { _libraryFilter = "Cardio"; renderLibraryTabs(); renderExerciseLibrary(); };
   container.appendChild(cardioTab);
@@ -748,10 +723,7 @@ function startTimer() {
     const diff = Math.floor((Date.now() - start) / 1000);
     const m = Math.floor(diff / 60).toString().padStart(2, '0');
     const s = (diff % 60).toString().padStart(2, '0');
-    const timeStr = `${m}:${s}`;
-    // Update both timer displays
-    $("#workoutTimer").textContent = timeStr;
-    $("#workoutTimerMini").textContent = timeStr;
+    $("#workoutTimer").textContent = `${m}:${s}`;
   }, 1000);
 }
 
@@ -1316,6 +1288,10 @@ function renderTemplateBuilderList() {
 }
 
 $("#btnCloseTemplateBuilder").addEventListener("click", () => {
+  // Warn if exercises have been added
+  if (_templateBuilderExercises.length > 0) {
+    if (!confirm("You have exercises added. Discard this template?")) return;
+  }
   $("#templateBuilderModal").classList.add("hidden");
   document.body.style.overflow = "";
 });
@@ -1323,6 +1299,10 @@ $("#btnCloseTemplateBuilder").addEventListener("click", () => {
 // Close template builder when clicking outside
 $("#templateBuilderModal").addEventListener("click", (e) => {
   if (e.target === $("#templateBuilderModal")) {
+    // Warn if exercises have been added
+    if (_templateBuilderExercises.length > 0) {
+      if (!confirm("You have exercises added. Discard this template?")) return;
+    }
     $("#templateBuilderModal").classList.add("hidden");
     document.body.style.overflow = "";
   }
@@ -1820,7 +1800,7 @@ function renderPickerTabs() {
         tab.style.borderColor = color;
         if (_pickerFilter === muscle) {
             tab.style.background = color;
-            tab.style.color = getContrastTextColor(color);
+            tab.style.color = "#000";
         }
         tab.onclick = () => { _pickerFilter = muscle; renderPickerTabs(); renderPickerList(); };
         container.appendChild(tab);
@@ -1834,7 +1814,7 @@ function renderPickerTabs() {
     cardioTab.style.borderColor = cardioColor;
     if (_pickerFilter === "Cardio") {
         cardioTab.style.background = cardioColor;
-        cardioTab.style.color = getContrastTextColor(cardioColor);
+        cardioTab.style.color = "#000";
     }
     cardioTab.onclick = () => { _pickerFilter = "Cardio"; renderPickerTabs(); renderPickerList(); };
     container.appendChild(cardioTab);
@@ -1893,21 +1873,12 @@ $("#btnTheme").addEventListener("click", () => {
    saveDB();
 });
 
-// Timer Toggle - Expand from minimal bar to full card
-$("#btnToggleTimerExpand").addEventListener("click", () => {
-  $("#timerBarMinimal").classList.add("hidden");
-  $("#timerCardFull").classList.remove("hidden");
-});
-
-// Timer Toggle - Collapse from full card to minimal bar
-$("#btnToggleTimerCollapse").addEventListener("click", () => {
-  $("#timerCardFull").classList.add("hidden");
-  $("#timerBarMinimal").classList.remove("hidden");
-});
-
-// Both finish buttons do the same thing
-$("#btnFinishWorkoutMini").addEventListener("click", () => {
-  $("#btnFinishWorkout").click();
+// Timer Toggle - Show/hide time display
+$("#btnToggleTimer").addEventListener("click", () => {
+  const display = $("#timerDisplay");
+  const btn = $("#btnToggleTimer");
+  display.classList.toggle("hidden");
+  btn.classList.toggle("expanded");
 });
 
 // Templates section collapsible toggle

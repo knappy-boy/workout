@@ -281,43 +281,15 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .theme-dark .suggestion { background: #1b3d1f; }
 
 /* TIMER STYLES */
-.timer-bar-minimal {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--red);
-  padding: 8px 12px;
-  border: var(--border);
-  box-shadow: var(--shadow);
-}
-.timer-mini {
-  font-weight: 900;
-  font-size: 1.1rem;
-  color: #fff;
-}
-.btn-ghost-mini {
-  background: none;
-  border: none;
-  color: #fff;
-  font-size: 1rem;
-  padding: 5px;
-  cursor: pointer;
-}
-.btn-white-small {
-  background: #fff;
-  color: #000;
-  border: 2px solid #000;
-  padding: 6px 12px;
-  font-weight: 700;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-.timer-large {
-  margin: 0;
+.timer-display {
   flex: 1;
   text-align: center;
 }
+.timer-display h2 {
+  margin: 0;
+}
 .timer-toggle { font-size: 1rem; padding: 5px 10px; }
+.timer-toggle.expanded { transform: rotate(180deg); }
 .text-center { text-align: center; }
 
 /* Save template button */
