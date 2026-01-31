@@ -248,7 +248,7 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 /* PICKER */
 .picker-box { background: var(--white); width: 90%; max-width: 500px; max-height: 80vh; margin-top: 10vh; border: var(--border); box-shadow: var(--shadow); padding: 20px; display: flex; flex-direction: column; }
 .picker-tabs { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
-.picker-tab { padding: 5px 10px; border: 2px solid #ccc; background: transparent; font-size: 0.75rem; font-weight: 700; cursor: pointer; border-radius: 99px; }
+.picker-tab { padding: 5px 10px; border: 2px solid #ccc; background: transparent; font-size: 0.75rem; font-weight: 700; cursor: pointer; border-radius: 99px; color: #000; }
 .picker-tab.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
 .theme-dark .picker-tab { border-color: #555; color: #fff; }
 .theme-dark .picker-tab.active { background: #fff; color: #000; border-color: #fff; }
@@ -288,21 +288,25 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .timer-display h2 {
   margin: 0;
 }
-.timer-toggle { font-size: 1rem; padding: 5px 10px; }
-.timer-toggle.expanded { transform: rotate(180deg); }
+.timer-toggle { font-size: 1rem; padding: 5px 10px; display: flex; align-items: center; }
+.timer-toggle svg { stroke: currentColor; }
 .text-center { text-align: center; }
 
 /* Save template button */
-.btn-black-outline {
+.btn-save-icon {
   background: transparent;
-  border: 2px solid var(--black);
+  border: none;
   color: var(--black);
   padding: 10px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
 }
-.theme-dark .btn-black-outline {
-  border-color: #fff;
+.theme-dark .btn-save-icon {
   color: #fff;
+}
+.btn-save-icon svg {
+  stroke: currentColor;
 }
 
 /* Collapsible sections */

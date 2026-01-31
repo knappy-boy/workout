@@ -1875,10 +1875,7 @@ $("#btnTheme").addEventListener("click", () => {
 
 // Timer Toggle - Show/hide time display
 $("#btnToggleTimer").addEventListener("click", () => {
-  const display = $("#timerDisplay");
-  const btn = $("#btnToggleTimer");
-  display.classList.toggle("hidden");
-  btn.classList.toggle("expanded");
+  $("#timerDisplay").classList.toggle("hidden");
 });
 
 // Templates section collapsible toggle
