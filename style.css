@@ -275,6 +275,16 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .theme-dark .recent-log-muscles { color: #aaa; }
 .theme-dark .recent-log-item { background: #1e1e1e; border-color: #444; }
 
+/* BODYWEIGHT CHART */
+.bw-period-tabs { display: flex; gap: 5px; }
+.bw-period-tab { padding: 5px 12px; border: 2px solid #ccc; background: transparent; font-size: 0.8rem; font-weight: 700; cursor: pointer; border-radius: 99px; }
+.bw-period-tab.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+.theme-dark .bw-period-tab { border-color: #555; color: #fff; }
+.theme-dark .bw-period-tab.active { background: #fff; color: #000; border-color: #fff; }
+.bw-chart-container { touch-action: none; cursor: grab; }
+.bw-chart-container:active { cursor: grabbing; }
+.bw-zoom-hint { text-align: center; }
+
 /* BODYWEIGHT ENTRIES */
 .bw-entries { max-height: 200px; overflow-y: auto; }
 .bw-entry { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 0.9rem; }

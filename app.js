@@ -28,6 +28,14 @@ const DEFAULT_DB = {
 const KG_TO_LBS = 2.20462;
 const LBS_TO_KG = 0.453592;
 
+// Bodyweight chart state
+let _bwPeriod = "month"; // "month", "year", "all"
+let _bwZoom = 1;
+let _bwPanOffset = 0; // as percentage of visible range
+let _bwIsDragging = false;
+let _bwDragStart = 0;
+let _bwPanStart = 0;
+
 let DB = loadDB();
 let ACTIVE_SESSION = null; 
 let WORKOUT_TIMER = null;
@@ -166,6 +174,94 @@ $("#btnLogBW").addEventListener("click", () => {
   $("#bwInput").value = "";
 });
 
+// Bodyweight period tabs
+document.querySelectorAll(".bw-period-tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".bw-period-tab").forEach(t => t.classList.remove("active"));
+    tab.classList.add("active");
+    _bwPeriod = tab.dataset.period;
+    _bwZoom = 1;
+    _bwPanOffset = 0;
+    drawBodyweightChart();
+  });
+});
+
+// Bodyweight chart zoom/pan
+const bwCanvas = $("#bwChart");
+
+// Mouse wheel zoom
+bwCanvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  _bwZoom = Math.max(1, Math.min(10, _bwZoom * delta));
+  drawBodyweightChart();
+}, { passive: false });
+
+// Mouse drag for panning
+bwCanvas.addEventListener("mousedown", (e) => {
+  _bwIsDragging = true;
+  _bwDragStart = e.clientX;
+  _bwPanStart = _bwPanOffset;
+  bwCanvas.style.cursor = "grabbing";
+});
+
+document.addEventListener("mousemove", (e) => {
+  if (!_bwIsDragging) return;
+  const dx = _bwDragStart - e.clientX;
+  const sensitivity = 0.5;
+  _bwPanOffset = _bwPanStart + dx * sensitivity * _bwZoom / 50;
+  drawBodyweightChart();
+});
+
+document.addEventListener("mouseup", () => {
+  if (_bwIsDragging) {
+    _bwIsDragging = false;
+    bwCanvas.style.cursor = "grab";
+  }
+});
+
+// Touch pinch zoom and pan
+let _bwTouchStartDist = 0;
+let _bwTouchStartZoom = 1;
+let _bwTouchStartX = 0;
+
+bwCanvas.addEventListener("touchstart", (e) => {
+  if (e.touches.length === 2) {
+    // Pinch zoom start
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    _bwTouchStartDist = Math.sqrt(dx * dx + dy * dy);
+    _bwTouchStartZoom = _bwZoom;
+  } else if (e.touches.length === 1) {
+    // Pan start
+    _bwIsDragging = true;
+    _bwTouchStartX = e.touches[0].clientX;
+    _bwPanStart = _bwPanOffset;
+  }
+}, { passive: true });
+
+bwCanvas.addEventListener("touchmove", (e) => {
+  if (e.touches.length === 2) {
+    // Pinch zoom
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const scale = dist / _bwTouchStartDist;
+    _bwZoom = Math.max(1, Math.min(10, _bwTouchStartZoom * scale));
+    drawBodyweightChart();
+  } else if (e.touches.length === 1 && _bwIsDragging) {
+    // Pan
+    const dx = _bwTouchStartX - e.touches[0].clientX;
+    const sensitivity = 0.3;
+    _bwPanOffset = _bwPanStart + dx * sensitivity * _bwZoom / 30;
+    drawBodyweightChart();
+  }
+}, { passive: true });
+
+bwCanvas.addEventListener("touchend", () => {
+  _bwIsDragging = false;
+});
+
 function updateBodyweightUnitLabel() {
   const label = $("#bwUnitLabel");
   if (label) label.textContent = getWeightUnit();
@@ -212,7 +308,21 @@ function deleteBodyweightEntry(index) {
 
 function drawBodyweightChart() {
   const canvas = $("#bwChart");
-  const data = DB.bodyweight.slice(-14); // Last 14 entries
+
+  // Filter data by period
+  let data = [...DB.bodyweight];
+  const now = new Date();
+
+  if (_bwPeriod === "month") {
+    const cutoff = new Date(now);
+    cutoff.setDate(cutoff.getDate() - 30);
+    data = data.filter(d => new Date(d.date) >= cutoff);
+  } else if (_bwPeriod === "year") {
+    const cutoff = new Date(now);
+    cutoff.setFullYear(cutoff.getFullYear() - 1);
+    data = data.filter(d => new Date(d.date) >= cutoff);
+  }
+  // "all" shows everything
 
   // High-DPI canvas setup
   const dpr = window.devicePixelRatio || 1;
@@ -240,8 +350,25 @@ function drawBodyweightChart() {
   const chartW = w - padding.left - padding.right;
   const chartH = h - padding.top - padding.bottom;
 
+  // Apply zoom - calculate visible range
+  const totalPoints = data.length;
+  const visiblePoints = Math.max(2, Math.floor(totalPoints / _bwZoom));
+
+  // Clamp pan offset
+  const maxOffset = Math.max(0, totalPoints - visiblePoints);
+  _bwPanOffset = Math.max(0, Math.min(_bwPanOffset, maxOffset));
+
+  const startIdx = Math.floor(_bwPanOffset);
+  const endIdx = Math.min(totalPoints, startIdx + visiblePoints);
+  const visibleData = data.slice(startIdx, endIdx);
+
+  if (visibleData.length < 2) {
+    ctx.clearRect(0, 0, w, h);
+    return;
+  }
+
   // Convert values to display unit
-  const values = data.map(d => convertWeight(d.kg));
+  const values = visibleData.map(d => convertWeight(d.kg));
   const dataMin = Math.min(...values);
   const dataMax = Math.max(...values);
 
@@ -249,7 +376,7 @@ function drawBodyweightChart() {
   const stepSize = DB.user.useLbs ? 10 : 5;
   const minVal = Math.floor(dataMin / stepSize) * stepSize - stepSize;
   const maxVal = Math.ceil(dataMax / stepSize) * stepSize + stepSize;
-  const range = maxVal - minVal;
+  const range = maxVal - minVal || 1;
   const numSteps = Math.ceil(range / stepSize);
 
   ctx.clearRect(0, 0, w, h);
@@ -274,10 +401,11 @@ function drawBodyweightChart() {
 
   // Draw X axis labels (dates)
   ctx.textAlign = "center";
-  const step = Math.max(1, Math.floor(data.length / 5));
-  data.forEach((d, i) => {
-    if (i % step === 0 || i === data.length - 1) {
-      const x = padding.left + (i / (data.length - 1)) * chartW;
+  ctx.fillStyle = textColor;
+  const labelStep = Math.max(1, Math.floor(visibleData.length / 5));
+  visibleData.forEach((d, i) => {
+    if (i % labelStep === 0 || i === visibleData.length - 1) {
+      const x = padding.left + (i / Math.max(1, visibleData.length - 1)) * chartW;
       const date = new Date(d.date);
       const label = `${date.getDate()}/${date.getMonth() + 1}`;
       ctx.fillText(label, x, h - padding.bottom + 20);
@@ -289,7 +417,7 @@ function drawBodyweightChart() {
   ctx.strokeStyle = "#FF3333";
   ctx.lineWidth = 3;
   values.forEach((val, i) => {
-    const x = padding.left + (i / (values.length - 1)) * chartW;
+    const x = padding.left + (i / Math.max(1, values.length - 1)) * chartW;
     const y = padding.top + chartH - ((val - minVal) / range) * chartH;
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
@@ -299,12 +427,20 @@ function drawBodyweightChart() {
   // Draw dots
   ctx.fillStyle = "#FF3333";
   values.forEach((val, i) => {
-    const x = padding.left + (i / (values.length - 1)) * chartW;
+    const x = padding.left + (i / Math.max(1, values.length - 1)) * chartW;
     const y = padding.top + chartH - ((val - minVal) / range) * chartH;
     ctx.beginPath();
     ctx.arc(x, y, 5, 0, Math.PI * 2);
     ctx.fill();
   });
+
+  // Show zoom indicator if zoomed in
+  if (_bwZoom > 1) {
+    ctx.font = "10px -apple-system, sans-serif";
+    ctx.fillStyle = textColor;
+    ctx.textAlign = "right";
+    ctx.fillText(`${Math.round(_bwZoom * 100)}%`, w - 5, 15);
+  }
 }
 
 // Calendar state

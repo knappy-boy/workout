@@ -146,9 +146,15 @@
     <section id="tab-stats" class="panel">
       <div class="neo-card bg-white">
         <h2>BODYWEIGHT</h2>
-        <div class="chart-container">
+        <div class="bw-period-tabs mb-2">
+          <button class="bw-period-tab active" data-period="month">Month</button>
+          <button class="bw-period-tab" data-period="year">Year</button>
+          <button class="bw-period-tab" data-period="all">All</button>
+        </div>
+        <div class="chart-container bw-chart-container">
           <canvas id="bwChart"></canvas>
         </div>
+        <div class="bw-zoom-hint muted small mt-1">Pinch or scroll to zoom • Drag to pan</div>
         <div class="row mt-2">
           <input id="bwInput" type="number" step="0.1" inputmode="decimal" placeholder="Weight">
           <span id="bwUnitLabel" class="unit-label">kg</span>
