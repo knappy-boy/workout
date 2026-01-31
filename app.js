@@ -745,6 +745,9 @@ $("#btnStartTemplate").addEventListener("click", () => {
 function startWorkout(template = null) {
   if (ACTIVE_SESSION && !confirm("Overwrite current workout?")) return;
 
+  // Reset timer display immediately to prevent flash of old time
+  $("#workoutTimer").textContent = "00:00";
+
   ACTIVE_SESSION = {
     id: uid(),
     start: new Date().toISOString(),
