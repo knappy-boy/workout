@@ -154,8 +154,9 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .history-meta { font-size: 0.85rem; margin-bottom: 8px; color: #666; }
 .theme-dark .history-meta { color: #aaa; }
 .history-detail { font-size: 0.9rem; margin-top: 5px; }
-.template-badge { display: inline-block; padding: 2px 8px; background: #E8A0A0; color: #000; font-size: 0.75rem; font-weight: bold; border-radius: 4px; }
-.template-badge.freestyle { background: #ddd; }
+.template-badge { display: inline-block; padding: 2px 8px; background: #fff; color: #000; font-size: 0.75rem; font-weight: bold; border: 2px solid #000; }
+.template-badge.freestyle { background: #fff; }
+.theme-dark .template-badge { background: #000; color: #fff; border-color: #fff; }
 .set-tag { display: inline-block; background: #ddd; padding: 2px 5px; margin: 2px; font-size: 0.8rem; border: 1px solid #000; }
 .theme-dark .set-tag { background: #333; border-color: #fff; }
 
