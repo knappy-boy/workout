@@ -380,10 +380,17 @@ function showDayDetails(iso, workouts) {
 
   if (!html) html = '<p class="muted">No exercises recorded</p>';
   $("#dayModalContent").innerHTML = html;
-  $("#dayModal").showModal();
+  $("#dayModal").classList.remove("hidden");
 }
 
-$("#btnCloseDayModal").addEventListener("click", () => $("#dayModal").close());
+$("#btnCloseDayModal").addEventListener("click", () => $("#dayModal").classList.add("hidden"));
+
+// Close day modal when clicking outside the box
+$("#dayModal").addEventListener("click", (e) => {
+  if (e.target === $("#dayModal")) {
+    $("#dayModal").classList.add("hidden");
+  }
+});
 
 $("#btnPrevMonth").addEventListener("click", () => {
   calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth() - 1, 1);

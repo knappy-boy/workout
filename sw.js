@@ -1,5 +1,5 @@
 // Change this version string EVERY time you update your code
-const CACHE = "liftlog-ultra-v11";
+const CACHE = "liftlog-ultra-v12";
 
 const ASSETS = [
   "./",
