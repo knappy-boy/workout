@@ -149,9 +149,10 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 
 /* MODALS & DRAWERS */
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; display: flex; justify-content: center; }
-.neo-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); border: var(--border); box-shadow: var(--shadow); background: var(--white); padding: 0; z-index: 201; width: 90%; max-width: 400px; max-height: 80vh; color: var(--black); display: flex; flex-direction: column; }
+.neo-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); border: var(--border); box-shadow: var(--shadow); background: var(--white); padding: 0; z-index: 201; width: 90%; max-width: 400px; max-height: 80vh; color: var(--black); }
+.neo-modal[open] { display: flex; flex-direction: column; }
 .neo-modal::backdrop { background: rgba(0,0,0,0.8); }
-.modal-content { padding: 20px; overflow-y: auto; flex: 1; }
+.modal-content { padding: 20px; overflow-y: auto; max-height: calc(80vh - 40px); }
 
 /* BOTTOM DRAWER FOR LOGGING */
 .drawer { 
