@@ -154,6 +154,7 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .history-meta { font-size: 0.85rem; margin-bottom: 8px; color: #666; }
 .theme-dark .history-meta { color: #aaa; }
 .history-detail { font-size: 0.9rem; margin-top: 5px; }
+.history-notes { font-size: 0.85rem; margin-top: 8px; padding: 8px; background: var(--gray); border-left: 3px solid var(--red); color: var(--black); }
 .template-badge { display: inline-block; padding: 2px 8px; background: #fff; color: #000; font-size: 0.75rem; font-weight: bold; border: 2px solid #000; }
 .template-badge.freestyle { background: #fff; }
 .theme-dark .template-badge { background: #000; color: #fff; border-color: #fff; }
@@ -314,11 +315,36 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 
 /* Collapsible sections */
 .collapsible-header { cursor: pointer; }
-.collapsible-header h3 { display: flex; align-items: center; gap: 8px; }
+.collapsible-header h2, .collapsible-header h3 { display: flex; align-items: center; gap: 8px; }
 .toggle-icon { font-size: 0.8rem; transition: transform 0.2s; }
 .toggle-icon.collapsed { transform: rotate(-90deg); }
-.collapsible-content { transition: max-height 0.2s ease-out; overflow: hidden; }
-.collapsible-content.collapsed { max-height: 0 !important; }
+.collapsible-content { transition: max-height 0.3s ease-out; overflow: hidden; max-height: 2000px; }
+.collapsible-content.collapsed { max-height: 0 !important; padding: 0; }
+
+/* Settings */
+.setting-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #eee; }
+.setting-row:last-child { border-bottom: none; }
+.theme-dark .setting-row { border-color: #333; }
+
+/* Toggle switch */
+.toggle-switch { position: relative; display: inline-block; width: 50px; height: 28px; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider { position: absolute; cursor: pointer; inset: 0; background: #ccc; transition: 0.3s; border: 2px solid #000; }
+.toggle-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #000; transition: 0.3s; }
+.toggle-switch input:checked + .toggle-slider { background: var(--red); }
+.toggle-switch input:checked + .toggle-slider:before { transform: translateX(22px); background: #fff; }
+
+/* Breakdown legend */
+.breakdown-legend { display: flex; flex-wrap: wrap; gap: 8px; }
+.legend-item { display: flex; align-items: center; gap: 4px; font-size: 0.75rem; }
+.legend-dot, .legend-color { width: 12px; height: 12px; border: 1px solid #000; }
+.theme-dark .legend-dot, .theme-dark .legend-color { border-color: #fff; }
+
+/* Secondary muscles for compound exercises */
+.secondary-muscles-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.secondary-muscle-chip { padding: 4px 8px; border: 2px solid #ccc; font-size: 0.75rem; cursor: pointer; background: transparent; }
+.secondary-muscle-chip.selected { background: var(--black); color: #fff; border-color: var(--black); }
+.theme-dark .secondary-muscle-chip.selected { background: #fff; color: #000; }
 
 /* TEMPLATE BUILDER */
 .template-builder-list { display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; }

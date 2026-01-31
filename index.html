@@ -87,6 +87,11 @@
         </div>
 
         <div id="activeExerciseList" class="stack-list"></div>
+
+        <div class="neo-card bg-white mt-4">
+          <h3>WORKOUT NOTES</h3>
+          <textarea id="workoutNotes" class="neo-input full mt-2" rows="3" placeholder="Add notes for this workout..."></textarea>
+        </div>
       </div>
 
       <div id="startWorkoutPanel">
@@ -152,19 +157,83 @@
 
       <div class="neo-card bg-white mt-4">
         <h2>EXERCISE PROGRESS</h2>
-        <select id="statExSelect" class="neo-select full mb-2"></select>
+        <div class="row gap-2 mb-2">
+          <select id="statExSelect" class="neo-select full"></select>
+          <select id="statChartType" class="neo-select" style="width: auto;">
+            <option value="volume">Volume</option>
+            <option value="maxWeight">Max Weight</option>
+          </select>
+        </div>
         <div class="chart-container large">
           <canvas id="progChart"></canvas>
         </div>
         <div id="exerciseHistory" class="exercise-history mt-4"></div>
       </div>
-       <div class="neo-card bg-black text-white mt-4">
-        <h2>DATA</h2>
-        <button id="btnExportCSV" class="btn-white full mt-2">EXPORT CSV</button>
-        <button id="btnExportJSON" class="btn-white full mt-2">BACKUP (JSON)</button>
-        <label class="btn-white full mt-2 text-center block">
-           RESTORE (JSON) <input type="file" id="fileRestore" hidden>
-        </label>
+
+      <div class="neo-card bg-white mt-4">
+        <div class="row collapsible-header" id="breakdownHeader">
+          <h2>WORKOUT BREAKDOWN <span id="breakdownToggle" class="toggle-icon collapsed">▼</span></h2>
+        </div>
+        <div id="breakdownContent" class="collapsible-content collapsed">
+          <div class="row gap-2 mb-2">
+            <select id="breakdownPeriod" class="neo-select">
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="year">This Year</option>
+            </select>
+            <select id="breakdownMode" class="neo-select">
+              <option value="total">Total Volume</option>
+              <option value="muscle">By Muscle</option>
+            </select>
+          </div>
+          <div class="chart-container large">
+            <canvas id="breakdownChart"></canvas>
+          </div>
+          <div id="breakdownLegend" class="breakdown-legend mt-2"></div>
+        </div>
+      </div>
+
+      <div class="neo-card bg-white mt-4">
+        <div class="row collapsible-header" id="settingsHeader">
+          <h2>SETTINGS <span id="settingsToggle" class="toggle-icon collapsed">▼</span></h2>
+        </div>
+        <div id="settingsContent" class="collapsible-content collapsed">
+          <div class="setting-row">
+            <span>Weight Unit</span>
+            <select id="settingUnit" class="neo-select" style="width: auto;">
+              <option value="kg">Kilograms (kg)</option>
+              <option value="lbs">Pounds (lbs)</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <span>Show Suggestions</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="settingSuggestions" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <span>Training Goal</span>
+            <select id="settingGoal" class="neo-select" style="width: auto;">
+              <option value="hypertrophy">Hypertrophy (8-20 reps)</option>
+              <option value="strength">Strength (1-5 reps)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="neo-card bg-black text-white mt-4">
+        <div class="row collapsible-header" id="dataHeader">
+          <h2>DATA <span id="dataToggle" class="toggle-icon collapsed">▼</span></h2>
+        </div>
+        <div id="dataContent" class="collapsible-content collapsed">
+          <button id="btnExportCSV" class="btn-white full mt-2">EXPORT CSV</button>
+          <button id="btnExportJSON" class="btn-white full mt-2">BACKUP (JSON)</button>
+          <label class="btn-white full mt-2 text-center block">
+             RESTORE (JSON) <input type="file" id="fileRestore" hidden>
+          </label>
+          <button id="btnFactoryReset" class="btn-white full mt-4" style="color: #ff3333;">FACTORY RESET</button>
+        </div>
       </div>
     </section>
 
@@ -232,15 +301,28 @@
         </div>
         <label class="checkbox-label mt-2">
           <input type="checkbox" id="newExAssisted">
-          Assisted exercise (e.g. pull-up with band)
+          Assisted exercise
         </label>
-        <p class="muted small">For assisted exercises, you'll log the assistance weight and we'll calculate effective weight</p>
+        <label class="checkbox-label mt-2">
+          <input type="checkbox" id="newExCompound">
+          Compound exercise (multiple muscles)
+        </label>
+        <div id="secondaryMusclesWrapper" class="hidden mt-2">
+          <label>Secondary Muscles</label>
+          <div id="secondaryMusclesList" class="secondary-muscles-list"></div>
+        </div>
       </div>
       <div id="cardioOptions" class="hidden mt-2">
          <label>Secondary metric name
            <input id="newExCardioMetric" class="neo-input" placeholder="e.g. floors, km, laps">
          </label>
-         <p class="muted small">Leave blank for default (km)</p>
+         <p class="muted small">Leave blank for default. Primary metric is always time (minutes).</p>
+         <label class="mt-2">Goal Type
+           <select id="newExCardioGoal" class="neo-select">
+             <option value="endurance">Endurance (distance/time)</option>
+             <option value="speed">Speed/Sprints (pace)</option>
+           </select>
+         </label>
       </div>
       <div class="row mt-4">
         <button id="btnCloseExModal" class="btn-ghost">CANCEL</button>

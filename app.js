@@ -8,13 +8,24 @@ const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // --- DEFAULT DATA & MIGRATION ---
 const DEFAULT_DB = {
-  user: { theme: "light", increment: 2.5 },
-  exercises: {}, // id -> {id, name, type, muscle, equip, increment}
+  user: {
+    theme: "light",
+    increment: 2.5,
+    unit: "kg",           // kg or lbs
+    showSuggestions: true,
+    trainingGoal: "hypertrophy", // hypertrophy or strength
+    bodyweight: null      // user's bodyweight for assisted exercises
+  },
+  exercises: {}, // id -> {id, name, type, muscle, equip, increment, isAssisted, isCompound, secondaryMuscles, cardioGoal}
   templates: {}, // id -> {id, name, exercises: [{exId, sets}]}
-  sessions: [],  // [{id, start, end, name, entries: {exId: [{w, r, note, type}] } }]
+  sessions: [],  // [{id, start, end, name, notes, entries: {exId: [{w, r, note, type}] } }]
   bodyweight: [], // [{date, kg}]
   goals: {}
 };
+
+// Conversion constants
+const KG_TO_LBS = 2.20462;
+const LBS_TO_KG = 0.453592;
 
 let DB = loadDB();
 let ACTIVE_SESSION = null; 
@@ -25,13 +36,19 @@ function uid() { return Date.now().toString(36) + Math.random().toString(36).sub
 function loadDB() {
   const str = localStorage.getItem(DB_KEY);
   if (!str) return JSON.parse(JSON.stringify(DEFAULT_DB));
-  
+
   const data = JSON.parse(str);
   // Simple migration checks
   if (!data.bodyweight) data.bodyweight = [];
   if (!data.templates) data.templates = {};
   if (!data.user) data.user = { theme: "light" };
-  
+
+  // Migrate user settings
+  if (data.user.unit === undefined) data.user.unit = "kg";
+  if (data.user.showSuggestions === undefined) data.user.showSuggestions = true;
+  if (data.user.trainingGoal === undefined) data.user.trainingGoal = "hypertrophy";
+  if (data.user.bodyweight === undefined) data.user.bodyweight = null;
+
   // Apply theme immediately
   document.body.className = `theme-${data.user.theme}`;
   return data;
@@ -365,6 +382,11 @@ function showDayDetails(iso, workouts) {
 
   let html = "";
   workouts.forEach(sess => {
+    // Show workout notes if any
+    if (sess.notes) {
+      html += `<div class="history-notes" style="margin-bottom:10px;"><em>${sess.notes}</em></div>`;
+    }
+
     (sess.order || []).forEach(exId => {
       const ex = DB.exercises[exId];
       const sets = sess.entries[exId];
@@ -374,8 +396,9 @@ function showDayDetails(iso, workouts) {
       const category = ex.type === 'cardio' ? 'Cardio' : (ex.muscle || 'Other');
       const color = MUSCLE_COLORS[category] || '#999';
 
+      const unit = DB.user.unit || 'kg';
       const setsHtml = sets.map(s => {
-        if (s.w) return `<span class="set-tag">${s.w}kg × ${s.r}</span>`;
+        if (s.w) return `<span class="set-tag">${s.w}${unit} × ${s.r}</span>`;
         if (s.time) return `<span class="set-tag">${s.time}m / ${s.dist}${ex.cardioMetric || 'km'}</span>`;
         return "";
       }).join("");
@@ -486,8 +509,9 @@ function renderExerciseLibrary() {
     if (lastSession) {
       const date = new Date(lastSession.date);
       const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      const unit = DB.user.unit || 'kg';
       const sets = lastSession.sets.map(s => {
-        if (s.w) return `${s.w}kg × ${s.r}`;
+        if (s.w) return `${s.w}${unit} × ${s.r}`;
         if (s.time) return `${s.time}m / ${s.dist}${ex.cardioMetric || 'km'}`;
         return '';
       }).filter(Boolean).join(', ');
@@ -588,10 +612,14 @@ function openNewExerciseModal() {
   $("#newExEquip").value = "barbell";
   $("#newExInc").value = "2.5";
   $("#newExCardioMetric").value = "";
+  $("#newExCardioGoal").value = "endurance";
   $("#newExAssisted").checked = false;
+  $("#newExCompound").checked = false;
+  _selectedSecondaryMuscles = [];
   $("#strengthOptions").classList.remove("hidden");
   $("#cardioOptions").classList.add("hidden");
   $("#muscleSelectWrapper").classList.remove("hidden");
+  $("#secondaryMusclesWrapper").classList.add("hidden");
   $("#btnDeleteEx").classList.add("hidden"); // Hide delete for new exercise
   $("#addExModal").classList.remove("hidden");
   document.body.style.overflow = "hidden";
@@ -633,6 +661,8 @@ $("#btnSaveEx").addEventListener("click", () => {
   if (!name) return;
 
   const type = $("#newExType").value;
+  const isCompound = type === 'strength' ? $("#newExCompound").checked : false;
+
   const exerciseData = {
     name,
     type,
@@ -640,7 +670,10 @@ $("#btnSaveEx").addEventListener("click", () => {
     equip: type === 'cardio' ? null : $("#newExEquip").value,
     increment: type === 'cardio' ? null : (parseFloat($("#newExInc").value) || 2.5),
     cardioMetric: type === 'cardio' ? ($("#newExCardioMetric").value.trim() || 'km') : null,
-    isAssisted: type === 'strength' ? $("#newExAssisted").checked : false
+    cardioGoal: type === 'cardio' ? $("#newExCardioGoal").value : null,
+    isAssisted: type === 'strength' ? $("#newExAssisted").checked : false,
+    isCompound: isCompound,
+    secondaryMuscles: isCompound ? _selectedSecondaryMuscles.slice() : []
   };
 
   if (EDITING_EXERCISE_ID) {
@@ -653,6 +686,7 @@ $("#btnSaveEx").addEventListener("click", () => {
   }
 
   EDITING_EXERCISE_ID = null;
+  _selectedSecondaryMuscles = []; // Reset
   saveDB();
   $("#addExModal").classList.add("hidden");
   document.body.style.overflow = "";
@@ -673,7 +707,12 @@ function editExercise(id) {
   $("#newExEquip").value = ex.equip || 'barbell';
   $("#newExInc").value = ex.increment || 2.5;
   $("#newExCardioMetric").value = ex.cardioMetric || '';
+  $("#newExCardioGoal").value = ex.cardioGoal || 'endurance';
   $("#newExAssisted").checked = ex.isAssisted || false;
+  $("#newExCompound").checked = ex.isCompound || false;
+
+  // Load secondary muscles
+  _selectedSecondaryMuscles = ex.secondaryMuscles ? ex.secondaryMuscles.slice() : [];
 
   // Show/hide options based on type
   if (ex.type === 'cardio') {
@@ -684,6 +723,14 @@ function editExercise(id) {
     $("#strengthOptions").classList.remove("hidden");
     $("#cardioOptions").classList.add("hidden");
     $("#muscleSelectWrapper").classList.remove("hidden");
+
+    // Show/hide secondary muscles
+    if (ex.isCompound) {
+      $("#secondaryMusclesWrapper").classList.remove("hidden");
+      renderSecondaryMusclesList();
+    } else {
+      $("#secondaryMusclesWrapper").classList.add("hidden");
+    }
   }
 
   $("#btnDeleteEx").classList.remove("hidden"); // Show delete for existing exercise
@@ -777,6 +824,9 @@ let _touchOffsetY = 0;
 function renderActiveSession() {
   const list = $("#activeExerciseList");
   list.innerHTML = "";
+
+  // Load workout notes
+  loadWorkoutNotes();
 
   ACTIVE_SESSION.order.forEach((exId, idx) => {
     const ex = DB.exercises[exId];
@@ -962,8 +1012,9 @@ function openLogger(exId) {
   const ex = DB.exercises[exId];
   $("#logModalTitle").textContent = ex.name;
 
-  // Headers based on type
+  // Headers based on type and unit setting
   const headers = $("#logHeaders");
+  const weightLabel = getWeightLabel();
   if (ex.type === 'cardio') {
     headers.querySelector(".h-val-1").textContent = "MINS";
     headers.querySelector(".h-val-2").textContent = (ex.cardioMetric || 'KM').toUpperCase();
@@ -971,7 +1022,7 @@ function openLogger(exId) {
     headers.querySelector(".h-val-1").textContent = "ASSIST";
     headers.querySelector(".h-val-2").textContent = "REPS";
   } else {
-    headers.querySelector(".h-val-1").textContent = "KG";
+    headers.querySelector(".h-val-1").textContent = weightLabel;
     headers.querySelector(".h-val-2").textContent = "REPS";
   }
 
@@ -996,21 +1047,28 @@ function openLogger(exId) {
       const increment = ex.increment || 2.5;
       const lowerWeight = bestSet.w;
       const higherWeight = bestSet.w + increment;
+      const unit = DB.user.unit || "kg";
+
+      // Adjust rep targets based on training goal
+      const goal = DB.user.trainingGoal || "hypertrophy";
+      const targetReps = goal === "strength" ? { low: 3, mid: 5, high: 8 } : { low: 8, mid: 10, high: 12 };
 
       // Suggestion: same weight = more reps, more weight = same/fewer reps
       let suggestion = "";
-      if (bestSet.r >= 12) {
-        suggestion = `<strong>Try: ${higherWeight}kg for 8-10 reps</strong> (time to increase!)`;
-      } else if (bestSet.r >= 8) {
-        suggestion = `<strong>Try: ${lowerWeight}-${higherWeight}kg for ${bestSet.r}-${bestSet.r + 2} reps</strong>`;
-      } else {
-        suggestion = `<strong>Try: ${lowerWeight}kg for ${bestSet.r + 1}-${bestSet.r + 3} reps</strong> (build reps first)`;
+      if (DB.user.showSuggestions !== false) {
+        if (bestSet.r >= targetReps.high) {
+          suggestion = `<strong>Try: ${higherWeight}${unit} for ${targetReps.low}-${targetReps.mid} reps</strong> (time to increase!)`;
+        } else if (bestSet.r >= targetReps.mid) {
+          suggestion = `<strong>Try: ${lowerWeight}-${higherWeight}${unit} for ${bestSet.r}-${bestSet.r + 2} reps</strong>`;
+        } else {
+          suggestion = `<strong>Try: ${lowerWeight}${unit} for ${bestSet.r + 1}-${bestSet.r + 3} reps</strong> (build reps first)`;
+        }
       }
 
       const dateStr = new Date(lastSession.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
       $("#prevSessionInfo").innerHTML = `
-        <div class="muted small">Last: ${dateStr} — Best set: ${bestSet.w}kg × ${bestSet.r}</div>
-        <div class="suggestion">${suggestion}</div>
+        <div class="muted small">Last: ${dateStr} — Best set: ${bestSet.w}${unit} × ${bestSet.r}</div>
+        ${DB.user.showSuggestions !== false ? `<div class="suggestion">${suggestion}</div>` : ''}
       `;
 
       // Add rows for each set done last time
@@ -1418,13 +1476,14 @@ function renderHistory() {
          if(!sets || sets.length === 0) return;
          const ex = DB.exercises[exId];
          const exName = ex?.name || "Unknown";
+         const unit = DB.user.unit || 'kg';
          let badges = sets.map(s => {
              if(s.w) {
                if (ex?.isAssisted && bw) {
                  const effective = bw - parseFloat(s.w);
-                 return `<span class="set-tag">${effective}kg eff × ${s.r}</span>`;
+                 return `<span class="set-tag">${effective}${unit} eff × ${s.r}</span>`;
                }
-               return `<span class="set-tag">${s.w}kg × ${s.r}</span>`;
+               return `<span class="set-tag">${s.w}${unit} × ${s.r}</span>`;
              }
              if(s.time) {
                const metric = ex?.cardioMetric || 'km';
@@ -1445,12 +1504,15 @@ function renderHistory() {
       ).length;
       const exerciseWord = loggedExerciseCount === 1 ? 'exercise' : 'exercises';
 
+      const notesHtml = sess.notes ? `<div class="history-notes"><em>${sess.notes}</em></div>` : '';
+
       div.innerHTML = `
         <div class="row">
           <div class="history-date">${date}${durationStr ? ` <span class="muted small">(${durationStr})</span>` : ''}</div>
           <button class="btn-ghost small text-red" onclick="deleteWorkout(${idx})">DELETE</button>
         </div>
         <div class="history-meta">${templateBadge} · ${loggedExerciseCount} ${exerciseWord}</div>
+        ${notesHtml}
         ${details}
       `;
       content.appendChild(div);
@@ -1519,10 +1581,17 @@ function renderStats() {
         sel.addEventListener("change", updateStatsChart);
     }
     updateStatsChart();
+
+    // Render breakdown chart
+    renderBreakdownChart();
+
+    // Load settings
+    loadSettings();
 }
 
 function updateStatsChart() {
     const exId = $("#statExSelect").value;
+    const chartType = $("#statChartType").value; // "volume" or "maxWeight"
     const ctx = $("#progChart").getContext("2d");
 
     // Reset canvas
@@ -1548,21 +1617,20 @@ function updateStatsChart() {
 
     const ex = DB.exercises[exId];
 
-    // Extract history - calculate total volume (weight × reps)
-    // Sessions are stored newest-first, so iterate in order for chart (oldest to newest)
-    // but keep a separate array for display (newest first)
-    const historyForChart = [];
+    // Extract history - calculate total volume and max weight
     const historyForDisplay = [];
     DB.sessions.forEach(s => {
         if(s.entries && s.entries[exId] && s.entries[exId].length > 0) {
             let totalVolume = 0;
+            let maxWeight = 0;
             const sets = s.entries[exId];
             sets.forEach(set => {
                 const weight = parseFloat(set.w || 0);
                 const reps = parseInt(set.r || 0);
                 totalVolume += weight * reps;
+                if (weight > maxWeight) maxWeight = weight;
             });
-            historyForDisplay.push({ date: s.start, volume: totalVolume, sets: sets });
+            historyForDisplay.push({ date: s.start, volume: totalVolume, maxWeight: maxWeight, sets: sets });
         }
     });
     // Chart needs oldest-first, display needs newest-first
@@ -1574,11 +1642,12 @@ function updateStatsChart() {
             historyContainer.innerHTML = '<p class="muted">No history for this exercise yet.</p>';
         } else {
             let html = '<h3 class="mb-2">LIFT HISTORY</h3>';
+            const unit = DB.user.unit || 'kg';
             historyForDisplay.slice(0, 3).forEach(h => {
                 const date = new Date(h.date);
                 const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
                 const setsHtml = h.sets.map(s => {
-                    if (s.w) return `<span class="set-tag">${s.w}kg × ${s.r}</span>`;
+                    if (s.w) return `<span class="set-tag">${s.w}${unit} × ${s.r}</span>`;
                     if (s.time) return `<span class="set-tag">${s.time}m / ${s.dist}${ex?.cardioMetric || 'km'}</span>`;
                     return '';
                 }).join('');
@@ -1591,7 +1660,10 @@ function updateStatsChart() {
         }
     }
 
-    if(history.length < 2 || history.every(h => h.volume === 0)) {
+    // Get the data based on chart type
+    const chartData = history.map(h => chartType === "maxWeight" ? h.maxWeight : h.volume);
+
+    if(history.length < 2 || chartData.every(v => v === 0)) {
         ctx.clearRect(0, 0, w, h);
         ctx.font = "14px -apple-system, sans-serif";
         ctx.fillStyle = textColor;
@@ -1604,9 +1676,8 @@ function updateStatsChart() {
     const chartW = w - padding.left - padding.right;
     const chartH = h - padding.top - padding.bottom;
 
-    const volumes = history.map(h => h.volume);
-    const dataMin = Math.min(...volumes);
-    const dataMax = Math.max(...volumes);
+    const dataMin = Math.min(...chartData);
+    const dataMax = Math.max(...chartData);
 
     // Round to nice intervals
     const range = dataMax - dataMin || 1;
@@ -1650,12 +1721,12 @@ function updateStatsChart() {
 
     // Draw line
     ctx.beginPath();
-    ctx.strokeStyle = "#1a1a1a";
-    if (isDark) ctx.strokeStyle = "#fff";
+    ctx.strokeStyle = chartType === "maxWeight" ? "#FF3333" : "#1a1a1a";
+    if (isDark && chartType !== "maxWeight") ctx.strokeStyle = "#fff";
     ctx.lineWidth = 3;
-    history.forEach((h, i) => {
-        const x = padding.left + (i / (history.length - 1)) * chartW;
-        const y = padding.top + chartH - ((h.volume - minVal) / finalRange) * chartH;
+    chartData.forEach((val, i) => {
+        const x = padding.left + (i / (chartData.length - 1)) * chartW;
+        const y = padding.top + chartH - ((val - minVal) / finalRange) * chartH;
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
     });
@@ -1663,9 +1734,9 @@ function updateStatsChart() {
 
     // Draw dots
     ctx.fillStyle = ctx.strokeStyle;
-    history.forEach((h, i) => {
-        const x = padding.left + (i / (history.length - 1)) * chartW;
-        const y = padding.top + chartH - ((h.volume - minVal) / finalRange) * chartH;
+    chartData.forEach((val, i) => {
+        const x = padding.left + (i / (chartData.length - 1)) * chartW;
+        const y = padding.top + chartH - ((val - minVal) / finalRange) * chartH;
         ctx.beginPath();
         ctx.arc(x, y, 5, 0, Math.PI * 2);
         ctx.fill();
@@ -1939,7 +2010,454 @@ window.addEventListener("resize", () => {
   }
 });
 
+// --- COLLAPSIBLE SECTIONS ---
+// Breakdown section toggle
+$("#breakdownHeader").addEventListener("click", () => {
+  const content = $("#breakdownContent");
+  const icon = $("#breakdownToggle");
+  content.classList.toggle("collapsed");
+  icon.classList.toggle("collapsed");
+});
+
+// Settings section toggle
+$("#settingsHeader").addEventListener("click", () => {
+  const content = $("#settingsContent");
+  const icon = $("#settingsToggle");
+  content.classList.toggle("collapsed");
+  icon.classList.toggle("collapsed");
+});
+
+// Data section toggle
+$("#dataHeader").addEventListener("click", () => {
+  const content = $("#dataContent");
+  const icon = $("#dataToggle");
+  content.classList.toggle("collapsed");
+  icon.classList.toggle("collapsed");
+});
+
+// --- SETTINGS ---
+function loadSettings() {
+  // Set unit selector
+  const unitSelect = $("#settingUnit");
+  if (unitSelect) unitSelect.value = DB.user.unit || "kg";
+
+  // Set suggestions toggle
+  const suggestionsToggle = $("#settingSuggestions");
+  if (suggestionsToggle) suggestionsToggle.checked = DB.user.showSuggestions !== false;
+
+  // Set training goal
+  const goalSelect = $("#settingGoal");
+  if (goalSelect) goalSelect.value = DB.user.trainingGoal || "hypertrophy";
+}
+
+// Unit setting change
+$("#settingUnit").addEventListener("change", (e) => {
+  DB.user.unit = e.target.value;
+  saveDB();
+  // Re-render current tab to apply unit changes
+  renderCurrentTab($(".tab.active").dataset.tab);
+});
+
+// Suggestions toggle
+$("#settingSuggestions").addEventListener("change", (e) => {
+  DB.user.showSuggestions = e.target.checked;
+  saveDB();
+});
+
+// Training goal change
+$("#settingGoal").addEventListener("change", (e) => {
+  DB.user.trainingGoal = e.target.value;
+  saveDB();
+});
+
+// --- UNIT CONVERSION HELPERS ---
+function formatWeight(kg) {
+  if (DB.user.unit === "lbs") {
+    return (kg * KG_TO_LBS).toFixed(1) + " lbs";
+  }
+  return kg + " kg";
+}
+
+function parseWeight(value) {
+  // Parse input and convert to kg for storage
+  const num = parseFloat(value);
+  if (isNaN(num)) return 0;
+  if (DB.user.unit === "lbs") {
+    return num * LBS_TO_KG;
+  }
+  return num;
+}
+
+function getWeightLabel() {
+  return DB.user.unit === "lbs" ? "LBS" : "KG";
+}
+
+// --- FACTORY RESET ---
+$("#btnFactoryReset").addEventListener("click", () => {
+  const confirmation = prompt('This will delete ALL your data permanently.\n\nType "RESET" to confirm:');
+  if (confirmation !== "RESET") {
+    if (confirmation !== null) {
+      alert('Reset cancelled. You must type "RESET" exactly to confirm.');
+    }
+    return;
+  }
+
+  // Clear everything
+  localStorage.removeItem(DB_KEY);
+  DB = JSON.parse(JSON.stringify(DEFAULT_DB));
+  saveDB();
+
+  // Reset UI
+  document.body.className = "theme-light";
+  ACTIVE_SESSION = null;
+  stopTimer();
+
+  alert("All data has been reset.");
+  renderCurrentTab("dashboard");
+});
+
+// --- WORKOUT NOTES ---
+// Save workout notes on input
+$("#workoutNotes").addEventListener("input", (e) => {
+  if (ACTIVE_SESSION) {
+    ACTIVE_SESSION.notes = e.target.value;
+  }
+});
+
+// Load workout notes when rendering active session
+function loadWorkoutNotes() {
+  const notesField = $("#workoutNotes");
+  if (notesField && ACTIVE_SESSION) {
+    notesField.value = ACTIVE_SESSION.notes || "";
+  }
+}
+
+// --- CHART TYPE TOGGLE ---
+$("#statChartType").addEventListener("change", () => {
+  updateStatsChart();
+});
+
+// --- COMPOUND EXERCISES ---
+// Toggle secondary muscles visibility
+$("#newExCompound").addEventListener("change", (e) => {
+  const wrapper = $("#secondaryMusclesWrapper");
+  if (e.target.checked) {
+    wrapper.classList.remove("hidden");
+    renderSecondaryMusclesList();
+  } else {
+    wrapper.classList.add("hidden");
+  }
+});
+
+let _selectedSecondaryMuscles = [];
+
+function renderSecondaryMusclesList() {
+  const container = $("#secondaryMusclesList");
+  container.innerHTML = "";
+
+  const primaryMuscle = $("#newExMuscle").value;
+
+  MUSCLE_GROUPS.forEach(muscle => {
+    // Don't show primary muscle as secondary option
+    if (muscle === primaryMuscle) return;
+
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = `secondary-muscle-chip ${_selectedSecondaryMuscles.includes(muscle) ? "selected" : ""}`;
+    chip.textContent = muscle;
+    chip.onclick = () => {
+      if (_selectedSecondaryMuscles.includes(muscle)) {
+        _selectedSecondaryMuscles = _selectedSecondaryMuscles.filter(m => m !== muscle);
+      } else {
+        _selectedSecondaryMuscles.push(muscle);
+      }
+      renderSecondaryMusclesList();
+    };
+    container.appendChild(chip);
+  });
+}
+
+// Update secondary muscles when primary changes
+$("#newExMuscle").addEventListener("change", () => {
+  if ($("#newExCompound").checked) {
+    // Remove primary from secondary if it was selected
+    const primary = $("#newExMuscle").value;
+    _selectedSecondaryMuscles = _selectedSecondaryMuscles.filter(m => m !== primary);
+    renderSecondaryMusclesList();
+  }
+});
+
+// --- BREAKDOWN CHART ---
+let breakdownChart = null;
+
+function renderBreakdownChart() {
+  const canvas = $("#breakdownChart");
+  if (!canvas) return;
+
+  const ctx = canvas.getContext("2d");
+  const period = $("#breakdownPeriod").value;
+  const mode = $("#breakdownMode").value;
+
+  // Reset canvas
+  ctx.canvas.width = ctx.canvas.offsetWidth;
+  ctx.canvas.height = ctx.canvas.offsetHeight;
+  const w = ctx.canvas.width;
+  const h = ctx.canvas.height;
+
+  const isDark = document.body.classList.contains("theme-dark");
+  const textColor = isDark ? "#fff" : "#000";
+
+  // Filter sessions by period
+  const now = new Date();
+  let startDate;
+  let labels = [];
+
+  if (period === "week") {
+    startDate = new Date(now);
+    startDate.setDate(now.getDate() - 6);
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(startDate);
+      d.setDate(startDate.getDate() + i);
+      labels.push(DAYS[d.getDay()]);
+    }
+  } else if (period === "month") {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    for (let i = 1; i <= daysInMonth; i++) {
+      labels.push(i.toString());
+    }
+  } else { // year
+    startDate = new Date(now.getFullYear(), 0, 1);
+    labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  }
+
+  // Get relevant sessions
+  const sessions = DB.sessions.filter(s => new Date(s.start) >= startDate);
+
+  if (sessions.length === 0) {
+    ctx.clearRect(0, 0, w, h);
+    ctx.font = "14px -apple-system, sans-serif";
+    ctx.fillStyle = textColor;
+    ctx.textAlign = "center";
+    ctx.fillText("No workouts in this period", w / 2, h / 2);
+    $("#breakdownLegend").innerHTML = "";
+    return;
+  }
+
+  // Calculate data based on mode
+  if (mode === "total") {
+    // Simple bar chart showing total volume per day/week/month
+    const volumeByPeriod = {};
+    labels.forEach((_, i) => volumeByPeriod[i] = 0);
+
+    sessions.forEach(s => {
+      const sessionDate = new Date(s.start);
+      let idx;
+
+      if (period === "week") {
+        const diff = Math.floor((sessionDate - startDate) / (1000 * 60 * 60 * 24));
+        idx = Math.max(0, Math.min(6, diff));
+      } else if (period === "month") {
+        idx = sessionDate.getDate() - 1;
+      } else {
+        idx = sessionDate.getMonth();
+      }
+
+      // Calculate total volume for session
+      Object.entries(s.entries || {}).forEach(([exId, sets]) => {
+        sets.forEach(set => {
+          const weight = parseFloat(set.w || 0);
+          const reps = parseInt(set.r || 0);
+          volumeByPeriod[idx] += weight * reps;
+        });
+      });
+    });
+
+    drawBarChart(ctx, labels, Object.values(volumeByPeriod), "#FF3333", textColor, isDark);
+    $("#breakdownLegend").innerHTML = '<span class="legend-item"><span class="legend-color" style="background:#FF3333"></span>Total Volume (kg × reps)</span>';
+
+  } else {
+    // Stacked bar chart by muscle group
+    const muscleData = {};
+    MUSCLE_GROUPS.concat(["Cardio"]).forEach(m => {
+      muscleData[m] = {};
+      labels.forEach((_, i) => muscleData[m][i] = 0);
+    });
+
+    sessions.forEach(s => {
+      const sessionDate = new Date(s.start);
+      let idx;
+
+      if (period === "week") {
+        const diff = Math.floor((sessionDate - startDate) / (1000 * 60 * 60 * 24));
+        idx = Math.max(0, Math.min(6, diff));
+      } else if (period === "month") {
+        idx = sessionDate.getDate() - 1;
+      } else {
+        idx = sessionDate.getMonth();
+      }
+
+      Object.entries(s.entries || {}).forEach(([exId, sets]) => {
+        const ex = DB.exercises[exId];
+        if (!ex) return;
+
+        const muscle = ex.type === "cardio" ? "Cardio" : (ex.muscle || "Other");
+        let volume = 0;
+
+        sets.forEach(set => {
+          if (set.w && set.r) {
+            volume += parseFloat(set.w) * parseInt(set.r);
+          } else if (set.time) {
+            volume += parseFloat(set.time) * 10; // Weight cardio by time
+          }
+        });
+
+        muscleData[muscle][idx] += volume;
+
+        // Also add to secondary muscles if compound
+        if (ex.isCompound && ex.secondaryMuscles) {
+          ex.secondaryMuscles.forEach(secMuscle => {
+            muscleData[secMuscle][idx] += volume * 0.5; // Secondary gets 50% credit
+          });
+        }
+      });
+    });
+
+    drawStackedBarChart(ctx, labels, muscleData, textColor, isDark);
+
+    // Render legend
+    const legendHtml = Object.entries(MUSCLE_COLORS)
+      .filter(([muscle]) => {
+        // Only show muscles that have data
+        return Object.values(muscleData[muscle] || {}).some(v => v > 0);
+      })
+      .map(([muscle, color]) =>
+        `<span class="legend-item"><span class="legend-color" style="background:${color}"></span>${muscle}</span>`
+      ).join("");
+    $("#breakdownLegend").innerHTML = legendHtml;
+  }
+}
+
+function drawBarChart(ctx, labels, values, color, textColor, isDark) {
+  const w = ctx.canvas.width;
+  const h = ctx.canvas.height;
+  const padding = { top: 20, right: 20, bottom: 40, left: 55 };
+  const chartW = w - padding.left - padding.right;
+  const chartH = h - padding.top - padding.bottom;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const maxVal = Math.max(...values) || 1;
+  const barWidth = chartW / labels.length * 0.7;
+  const gap = chartW / labels.length * 0.15;
+
+  // Y axis
+  ctx.font = "10px -apple-system, sans-serif";
+  ctx.fillStyle = textColor;
+  ctx.textAlign = "right";
+
+  const steps = 5;
+  for (let i = 0; i <= steps; i++) {
+    const val = (maxVal / steps) * i;
+    const y = padding.top + chartH - (i / steps) * chartH;
+    ctx.fillText(Math.round(val).toLocaleString(), padding.left - 8, y + 4);
+    ctx.strokeStyle = isDark ? "#333" : "#ddd";
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(w - padding.right, y);
+    ctx.stroke();
+  }
+
+  // Bars
+  ctx.fillStyle = color;
+  values.forEach((val, i) => {
+    const x = padding.left + gap + i * (chartW / labels.length);
+    const barH = (val / maxVal) * chartH;
+    const y = padding.top + chartH - barH;
+    ctx.fillRect(x, y, barWidth, barH);
+  });
+
+  // X labels
+  ctx.textAlign = "center";
+  ctx.fillStyle = textColor;
+  const step = labels.length > 15 ? Math.ceil(labels.length / 8) : 1;
+  labels.forEach((label, i) => {
+    if (i % step === 0) {
+      const x = padding.left + gap + barWidth / 2 + i * (chartW / labels.length);
+      ctx.fillText(label, x, h - padding.bottom + 15);
+    }
+  });
+}
+
+function drawStackedBarChart(ctx, labels, muscleData, textColor, isDark) {
+  const w = ctx.canvas.width;
+  const h = ctx.canvas.height;
+  const padding = { top: 20, right: 20, bottom: 40, left: 55 };
+  const chartW = w - padding.left - padding.right;
+  const chartH = h - padding.top - padding.bottom;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Calculate max stacked value
+  const totals = labels.map((_, i) => {
+    return Object.values(muscleData).reduce((sum, muscle) => sum + (muscle[i] || 0), 0);
+  });
+  const maxVal = Math.max(...totals) || 1;
+
+  const barWidth = chartW / labels.length * 0.7;
+  const gap = chartW / labels.length * 0.15;
+
+  // Y axis
+  ctx.font = "10px -apple-system, sans-serif";
+  ctx.fillStyle = textColor;
+  ctx.textAlign = "right";
+
+  const steps = 5;
+  for (let i = 0; i <= steps; i++) {
+    const val = (maxVal / steps) * i;
+    const y = padding.top + chartH - (i / steps) * chartH;
+    ctx.fillText(Math.round(val).toLocaleString(), padding.left - 8, y + 4);
+    ctx.strokeStyle = isDark ? "#333" : "#ddd";
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(w - padding.right, y);
+    ctx.stroke();
+  }
+
+  // Stacked bars
+  labels.forEach((_, i) => {
+    const x = padding.left + gap + i * (chartW / labels.length);
+    let currentY = padding.top + chartH;
+
+    Object.entries(MUSCLE_COLORS).forEach(([muscle, color]) => {
+      const val = muscleData[muscle]?.[i] || 0;
+      if (val === 0) return;
+
+      const barH = (val / maxVal) * chartH;
+      ctx.fillStyle = color;
+      ctx.fillRect(x, currentY - barH, barWidth, barH);
+      currentY -= barH;
+    });
+  });
+
+  // X labels
+  ctx.textAlign = "center";
+  ctx.fillStyle = textColor;
+  const step = labels.length > 15 ? Math.ceil(labels.length / 8) : 1;
+  labels.forEach((label, i) => {
+    if (i % step === 0) {
+      const x = padding.left + gap + barWidth / 2 + i * (chartW / labels.length);
+      ctx.fillText(label, x, h - padding.bottom + 15);
+    }
+  });
+}
+
+// Breakdown chart controls
+$("#breakdownPeriod").addEventListener("change", renderBreakdownChart);
+$("#breakdownMode").addEventListener("change", renderBreakdownChart);
+
 // Initialization
 migrateExerciseCategories();
 populateSelects();
+loadSettings();
 renderCurrentTab("dashboard");
