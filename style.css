@@ -149,10 +149,31 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 
 /* MODALS & DRAWERS */
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; display: flex; justify-content: center; }
-.neo-modal { border: var(--border); box-shadow: var(--shadow); background: var(--white); padding: 0; width: 90%; max-width: 400px; max-height: 80vh; color: var(--black); margin: auto; margin-top: 10vh; }
-.neo-modal[open] { display: flex; flex-direction: column; }
-.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
-.modal-content { padding: 20px; overflow-y: auto; flex: 1; }
+dialog.neo-modal {
+  border: var(--border);
+  box-shadow: var(--shadow);
+  background: var(--white);
+  padding: 0;
+  width: 90%;
+  max-width: 400px;
+  max-height: 80vh;
+  color: var(--black);
+}
+dialog.neo-modal[open] {
+  display: flex;
+  flex-direction: column;
+}
+dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
+.modal-content { padding: 20px; overflow-y: auto; flex: 1; max-height: calc(80vh - 40px); }
+
+/* Day modal specific styling for iOS */
+#dayModal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+}
 
 /* BOTTOM DRAWER FOR LOGGING */
 .drawer { 
