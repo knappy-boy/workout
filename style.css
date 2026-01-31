@@ -23,7 +23,19 @@ body.theme-dark {
 
 /* BASE */
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-body { margin: 0; background-color: var(--gray); color: var(--black); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding-bottom: 80px; transition: background 0.3s; }
+html { background-color: var(--gray); }
+body {
+  margin: 0;
+  background-color: var(--gray);
+  color: var(--black);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  transition: background 0.3s;
+  min-height: 100vh;
+  /* Extend background to edges on iOS */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
 
 /* Hide scrollbars but keep scrolling */
 * {

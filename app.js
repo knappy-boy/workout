@@ -368,27 +368,36 @@ function showDayDetails(iso, workouts) {
       const sets = sess.entries[exId];
       if (!ex || !sets || sets.length === 0) return;
 
+      // Get muscle group and color
+      const category = ex.type === 'cardio' ? 'Cardio' : (ex.muscle || 'Other');
+      const color = MUSCLE_COLORS[category] || '#999';
+
       const setsHtml = sets.map(s => {
         if (s.w) return `<span class="set-tag">${s.w}kg × ${s.r}</span>`;
-        if (s.time) return `<span class="set-tag">${s.time}m / ${s.dist}km</span>`;
+        if (s.time) return `<span class="set-tag">${s.time}m / ${s.dist}${ex.cardioMetric || 'km'}</span>`;
         return "";
       }).join("");
 
-      html += `<div class="day-exercise"><strong>${ex.name}</strong><br>${setsHtml}</div>`;
+      html += `<div class="day-exercise"><strong>${ex.name}</strong> <span class="muscle-tag" style="background:${color}">${category}</span><br>${setsHtml}</div>`;
     });
   });
 
   if (!html) html = '<p class="muted">No exercises recorded</p>';
   $("#dayModalContent").innerHTML = html;
   $("#dayModal").classList.remove("hidden");
+  document.body.style.overflow = "hidden"; // Prevent background scroll
 }
 
-$("#btnCloseDayModal").addEventListener("click", () => $("#dayModal").classList.add("hidden"));
+$("#btnCloseDayModal").addEventListener("click", () => {
+  $("#dayModal").classList.add("hidden");
+  document.body.style.overflow = ""; // Restore scroll
+});
 
 // Close day modal when clicking outside the box
 $("#dayModal").addEventListener("click", (e) => {
   if (e.target === $("#dayModal")) {
     $("#dayModal").classList.add("hidden");
+    document.body.style.overflow = ""; // Restore scroll
   }
 });
 
