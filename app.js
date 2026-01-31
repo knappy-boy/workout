@@ -1609,7 +1609,10 @@ function renderStats() {
             opt.value = ex.id; opt.textContent = ex.name;
             sel.appendChild(opt);
         });
-        sel.addEventListener("change", updateStatsChart);
+        sel.addEventListener("change", () => {
+            _exerciseHistoryExpanded = false; // Reset when exercise changes
+            updateStatsChart();
+        });
     }
     updateStatsChart();
 
@@ -1677,8 +1680,12 @@ function updateStatsChart() {
         if (historyForDisplay.length === 0) {
             historyContainer.innerHTML = '<p class="muted">No history for this exercise yet.</p>';
         } else {
+            const showAll = _exerciseHistoryExpanded;
+            const itemsToShow = showAll ? historyForDisplay : historyForDisplay.slice(0, 3);
+            const remaining = historyForDisplay.length - 3;
+
             let html = '<h3 class="mb-2">LIFT HISTORY</h3>';
-            historyForDisplay.slice(0, 3).forEach(h => {
+            itemsToShow.forEach(h => {
                 const date = new Date(h.date);
                 const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
                 const setsHtml = h.sets.map(s => {
@@ -1691,10 +1698,31 @@ function updateStatsChart() {
                 }).join('');
                 html += `<div class="ex-history-item"><strong>${dateStr}</strong> ${setsHtml}</div>`;
             });
-            if (historyForDisplay.length > 3) {
-                html += `<p class="muted small">+ ${historyForDisplay.length - 3} more sessions</p>`;
+
+            if (remaining > 0) {
+                if (showAll) {
+                    html += `<button class="btn-ghost small expand-history" id="btnCollapseHistory">▲ Show less</button>`;
+                } else {
+                    html += `<button class="btn-ghost small expand-history" id="btnExpandHistory">▼ + ${remaining} more sessions</button>`;
+                }
             }
             historyContainer.innerHTML = html;
+
+            // Add click handlers
+            const expandBtn = $("#btnExpandHistory");
+            const collapseBtn = $("#btnCollapseHistory");
+            if (expandBtn) {
+                expandBtn.onclick = () => {
+                    _exerciseHistoryExpanded = true;
+                    updateStatsChart();
+                };
+            }
+            if (collapseBtn) {
+                collapseBtn.onclick = () => {
+                    _exerciseHistoryExpanded = false;
+                    updateStatsChart();
+                };
+            }
         }
     }
 
@@ -2005,6 +2033,15 @@ $("#btnTheme").addEventListener("click", () => {
    DB.user.theme = DB.user.theme === "light" ? "dark" : "light";
    document.body.className = `theme-${DB.user.theme}`;
    saveDB();
+   // Re-render charts to update colors
+   const activeTab = $(".tab.active")?.dataset.tab;
+   if (activeTab === "stats") {
+     drawBodyweightChart();
+     updateStatsChart();
+     renderBreakdownChart();
+   } else if (activeTab === "dashboard") {
+     renderCalendar();
+   }
 });
 
 // Timer Toggle - Show/hide time display
@@ -2244,6 +2281,7 @@ $("#newExMuscle").addEventListener("change", () => {
 // --- BREAKDOWN CHART ---
 let _breakdownOffset = 0; // 0 = current period, -1 = previous, etc.
 let _hiddenMuscles = new Set(); // Muscles hidden from chart
+let _exerciseHistoryExpanded = false; // Whether to show all exercise history
 
 function getBreakdownPeriodInfo() {
   const period = $("#breakdownPeriod").value;
@@ -2304,7 +2342,7 @@ function renderBreakdownChart() {
   const { startDate, endDate, labels, labelText, period } = getBreakdownPeriodInfo();
   $("#breakdownPeriodLabel").textContent = labelText;
 
-  const mode = $("#breakdownMode").value;
+  const mode = $("#breakdownMode").value; // "volume" or "sets"
   const isDark = document.body.classList.contains("theme-dark");
   const textColor = isDark ? "#fff" : "#000";
 
@@ -2335,62 +2373,36 @@ function renderBreakdownChart() {
     return;
   }
 
+  // Data structure for all muscle groups including Cardio
+  const allGroups = [...MUSCLE_GROUPS, "Cardio"];
+  const muscleData = {};
+  allGroups.forEach(m => {
+    muscleData[m] = {};
+    labels.forEach((_, i) => muscleData[m][i] = 0);
+  });
+
   // Calculate data based on mode
-  if (mode === "total") {
-    // Simple bar chart showing total volume per day/week/month
-    const volumeByPeriod = {};
-    labels.forEach((_, i) => volumeByPeriod[i] = 0);
+  sessions.forEach(s => {
+    const sessionDate = new Date(s.start);
+    let idx = getBreakdownIndex(sessionDate, startDate, period, labels.length);
 
-    sessions.forEach(s => {
-      const sessionDate = new Date(s.start);
-      let idx = getBreakdownIndex(sessionDate, startDate, period, labels.length);
+    Object.entries(s.entries || {}).forEach(([exId, sets]) => {
+      const ex = DB.exercises[exId];
+      if (!ex || !sets || sets.length === 0) return;
 
-      // Calculate total volume for session (strength only)
-      Object.entries(s.entries || {}).forEach(([exId, sets]) => {
-        const ex = DB.exercises[exId];
-        if (!ex || ex.type === "cardio") return;
-
-        sets.forEach(set => {
-          const weight = parseFloat(set.w || 0);
-          const reps = parseInt(set.r || 0);
-          // Convert weight to display unit for chart
-          volumeByPeriod[idx] += convertWeight(weight) * reps;
-        });
-      });
-    });
-
-    const unit = getWeightUnit();
-    drawHiResBarChart(ctx, w, h, labels, Object.values(volumeByPeriod), "#FF3333", textColor, isDark);
-    $("#breakdownLegend").innerHTML = `<span class="legend-tab active" style="border-color:#FF3333;background:#FF3333;color:#000">Total Volume (${unit} × reps)</span>`;
-    $("#breakdownCardio").innerHTML = "";
-
-  } else {
-    // Stacked bar chart by muscle group
-    const muscleData = {};
-    let cardioSessions = 0;
-
-    MUSCLE_GROUPS.forEach(m => {
-      muscleData[m] = {};
-      labels.forEach((_, i) => muscleData[m][i] = 0);
-    });
-
-    sessions.forEach(s => {
-      const sessionDate = new Date(s.start);
-      let idx = getBreakdownIndex(sessionDate, startDate, period, labels.length);
-      let hasCardio = false;
-
-      Object.entries(s.entries || {}).forEach(([exId, sets]) => {
-        const ex = DB.exercises[exId];
-        if (!ex) return;
-
-        if (ex.type === "cardio") {
-          hasCardio = true;
-          return; // Skip cardio for volume chart
+      if (ex.type === "cardio") {
+        // For cardio, count sets (each entry is a set)
+        if (!_hiddenMuscles.has("Cardio")) {
+          muscleData["Cardio"][idx] += sets.length;
         }
+        return;
+      }
 
-        const muscle = ex.muscle || "Other";
+      const muscle = ex.muscle || "Other";
+
+      if (mode === "volume") {
+        // Volume = weight × reps
         let volume = 0;
-
         sets.forEach(set => {
           if (set.w && set.r) {
             volume += convertWeight(parseFloat(set.w)) * parseInt(set.r);
@@ -2401,7 +2413,7 @@ function renderBreakdownChart() {
           muscleData[muscle][idx] += volume;
         }
 
-        // Also add to secondary muscles if compound and setting enabled
+        // Secondary muscles get 50% credit if enabled
         if (DB.user.includeCompound && ex.isCompound && ex.secondaryMuscles) {
           ex.secondaryMuscles.forEach(secMuscle => {
             if (!_hiddenMuscles.has(secMuscle)) {
@@ -2409,52 +2421,89 @@ function renderBreakdownChart() {
             }
           });
         }
-      });
-
-      if (hasCardio) cardioSessions++;
-    });
-
-    drawHiResStackedBarChart(ctx, w, h, labels, muscleData, textColor, isDark);
-
-    // Render clickable legend styled like tabs
-    const legendContainer = $("#breakdownLegend");
-    legendContainer.innerHTML = "";
-
-    MUSCLE_GROUPS.forEach(muscle => {
-      // Check if muscle has any data
-      const hasData = Object.values(muscleData[muscle] || {}).some(v => v > 0) || _hiddenMuscles.has(muscle);
-      if (!hasData && !_hiddenMuscles.has(muscle)) return;
-
-      const color = MUSCLE_COLORS[muscle] || "#999";
-      const isHidden = _hiddenMuscles.has(muscle);
-
-      const tab = document.createElement("button");
-      tab.className = `legend-tab ${isHidden ? "inactive" : "active"}`;
-      tab.textContent = muscle;
-      tab.style.borderColor = color;
-      if (!isHidden) {
-        tab.style.background = color;
-        tab.style.color = "#000";
-      }
-      tab.onclick = () => {
-        if (_hiddenMuscles.has(muscle)) {
-          _hiddenMuscles.delete(muscle);
-        } else {
-          _hiddenMuscles.add(muscle);
+      } else {
+        // Sets mode - count number of sets
+        if (!_hiddenMuscles.has(muscle)) {
+          muscleData[muscle][idx] += sets.length;
         }
-        renderBreakdownChart();
-      };
-      legendContainer.appendChild(tab);
-    });
 
-    // Show cardio session count
-    if (cardioSessions > 0) {
-      const cardioWord = cardioSessions === 1 ? "session" : "sessions";
-      $("#breakdownCardio").innerHTML = `<span style="color:${MUSCLE_COLORS.Cardio}">●</span> ${cardioSessions} cardio ${cardioWord}`;
-    } else {
-      $("#breakdownCardio").innerHTML = "";
-    }
+        // Secondary muscles get credited with sets too if enabled
+        if (DB.user.includeCompound && ex.isCompound && ex.secondaryMuscles) {
+          ex.secondaryMuscles.forEach(secMuscle => {
+            if (!_hiddenMuscles.has(secMuscle)) {
+              muscleData[secMuscle][idx] += sets.length;
+            }
+          });
+        }
+      }
+    });
+  });
+
+  drawHiResStackedBarChart(ctx, w, h, labels, muscleData, allGroups, textColor, isDark);
+
+  // Render clickable legend styled like tabs
+  const legendContainer = $("#breakdownLegend");
+  legendContainer.innerHTML = "";
+
+  // Add "All" button first
+  const allBtn = document.createElement("button");
+  const allSelected = _hiddenMuscles.size === 0;
+  allBtn.className = `legend-tab ${allSelected ? "active" : "inactive"}`;
+  allBtn.textContent = "All";
+  allBtn.style.borderColor = isDark ? "#fff" : "#000";
+  if (allSelected) {
+    allBtn.style.background = isDark ? "#fff" : "#000";
+    allBtn.style.color = isDark ? "#000" : "#fff";
   }
+  allBtn.onclick = () => {
+    if (_hiddenMuscles.size === 0) {
+      // Hide all
+      allGroups.forEach(m => _hiddenMuscles.add(m));
+    } else {
+      // Show all
+      _hiddenMuscles.clear();
+    }
+    renderBreakdownChart();
+  };
+  legendContainer.appendChild(allBtn);
+
+  // Add individual muscle tabs
+  allGroups.forEach(muscle => {
+    // Check if muscle has any data across the period
+    const hasData = Object.values(muscleData[muscle] || {}).some(v => v > 0);
+    // Always show if it has data OR if it's currently hidden (so user can re-enable)
+    if (!hasData && !_hiddenMuscles.has(muscle)) return;
+
+    const color = MUSCLE_COLORS[muscle] || "#999";
+    const isHidden = _hiddenMuscles.has(muscle);
+
+    const tab = document.createElement("button");
+    tab.className = `legend-tab ${isHidden ? "inactive" : "active"}`;
+    tab.textContent = muscle;
+    tab.style.borderColor = color;
+    if (!isHidden) {
+      tab.style.background = color;
+      tab.style.color = "#000";
+    } else {
+      // For inactive state in dark mode
+      if (isDark) {
+        tab.style.borderColor = color;
+        tab.style.color = "#fff";
+      }
+    }
+    tab.onclick = () => {
+      if (_hiddenMuscles.has(muscle)) {
+        _hiddenMuscles.delete(muscle);
+      } else {
+        _hiddenMuscles.add(muscle);
+      }
+      renderBreakdownChart();
+    };
+    legendContainer.appendChild(tab);
+  });
+
+  // Clear cardio summary since it's now in the chart
+  $("#breakdownCardio").innerHTML = "";
 }
 
 function getBreakdownIndex(date, startDate, period, maxLabels) {
@@ -2521,7 +2570,7 @@ function drawHiResBarChart(ctx, w, h, labels, values, color, textColor, isDark) 
   });
 }
 
-function drawHiResStackedBarChart(ctx, w, h, labels, muscleData, textColor, isDark) {
+function drawHiResStackedBarChart(ctx, w, h, labels, muscleData, groups, textColor, isDark) {
   const padding = { top: 20, right: 20, bottom: 40, left: 55 };
   const chartW = w - padding.left - padding.right;
   const chartH = h - padding.top - padding.bottom;
@@ -2530,7 +2579,7 @@ function drawHiResStackedBarChart(ctx, w, h, labels, muscleData, textColor, isDa
 
   // Calculate max stacked value (excluding hidden muscles)
   const totals = labels.map((_, i) => {
-    return MUSCLE_GROUPS.reduce((sum, muscle) => {
+    return groups.reduce((sum, muscle) => {
       if (_hiddenMuscles.has(muscle)) return sum;
       return sum + (muscleData[muscle]?.[i] || 0);
     }, 0);
@@ -2565,7 +2614,7 @@ function drawHiResStackedBarChart(ctx, w, h, labels, muscleData, textColor, isDa
     const x = padding.left + gap + i * (chartW / labels.length);
     let currentY = padding.top + chartH;
 
-    MUSCLE_GROUPS.forEach(muscle => {
+    groups.forEach(muscle => {
       if (_hiddenMuscles.has(muscle)) return;
       const val = muscleData[muscle]?.[i] || 0;
       if (val === 0) return;

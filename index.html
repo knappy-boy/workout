@@ -183,8 +183,8 @@
               <option value="year">Year</option>
             </select>
             <select id="breakdownMode" class="neo-select">
-              <option value="total">Total Volume</option>
-              <option value="muscle">By Muscle</option>
+              <option value="volume">Volume</option>
+              <option value="sets">Sets</option>
             </select>
           </div>
           <div class="row mb-2">
@@ -206,13 +206,12 @@
         </div>
         <div id="settingsContent" class="collapsible-content collapsed">
           <div class="setting-row">
-            <div>
-              <span>Use Pounds (lbs)</span>
-              <div class="setting-hint">Default is kilograms</div>
-            </div>
-            <label class="toggle-switch">
+            <span>Weight Unit</span>
+            <label class="unit-toggle">
+              <span class="unit-label-kg">KG</span>
               <input type="checkbox" id="settingUnit">
-              <span class="toggle-slider"></span>
+              <span class="unit-toggle-track"></span>
+              <span class="unit-label-lbs">LBS</span>
             </label>
           </div>
           <div class="setting-row">

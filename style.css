@@ -328,6 +328,20 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .setting-hint { font-size: 0.75rem; color: #888; margin-top: 2px; }
 .theme-dark .setting-hint { color: #666; }
 
+/* Unit toggle with labels */
+.unit-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.unit-toggle input { display: none; }
+.unit-label-kg, .unit-label-lbs { font-weight: 700; font-size: 0.85rem; transition: opacity 0.2s; }
+.unit-label-kg { opacity: 1; }
+.unit-label-lbs { opacity: 0.4; }
+.unit-toggle input:checked ~ .unit-label-kg { opacity: 0.4; }
+.unit-toggle input:checked ~ .unit-label-lbs { opacity: 1; }
+.unit-toggle-track { position: relative; width: 40px; height: 22px; background: #ccc; border: 2px solid #000; transition: background 0.2s; }
+.unit-toggle-track:before { content: ""; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px; background: #000; transition: transform 0.2s; }
+.unit-toggle input:checked + .unit-toggle-track:before { transform: translateX(18px); }
+.theme-dark .unit-toggle-track { border-color: #fff; }
+.theme-dark .unit-toggle-track:before { background: #fff; }
+
 /* Toggle switch */
 .toggle-switch { position: relative; display: inline-block; width: 50px; height: 28px; }
 .toggle-switch input { opacity: 0; width: 0; height: 0; }
@@ -340,7 +354,7 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .breakdown-period-label { font-weight: 700; font-size: 0.9rem; text-transform: uppercase; }
 
 /* Breakdown legend - styled like picker tabs */
-.breakdown-legend { display: flex; flex-wrap: wrap; gap: 6px; }
+.breakdown-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .legend-tab {
   padding: 4px 10px;
   border: 2px solid #ccc;
@@ -353,9 +367,10 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
   transition: all 0.15s;
 }
 .legend-tab.active { color: #000; }
-.legend-tab.inactive { opacity: 0.4; }
+.legend-tab.inactive { opacity: 0.5; background: transparent !important; }
 .theme-dark .legend-tab { color: #fff; border-color: #555; }
-.theme-dark .legend-tab.inactive { opacity: 0.3; }
+.theme-dark .legend-tab.active { color: #000; }
+.theme-dark .legend-tab.inactive { opacity: 0.4; color: #fff; }
 
 /* Breakdown cardio summary */
 .breakdown-cardio { font-size: 0.85rem; color: #666; }
@@ -363,6 +378,9 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 
 /* Unit label for inputs */
 .unit-label { font-weight: 700; font-size: 0.9rem; margin-left: -5px; margin-right: 10px; }
+
+/* Expand history button */
+.expand-history { width: 100%; text-align: center; margin-top: 8px; color: var(--red); }
 
 /* Secondary muscles for compound exercises */
 .secondary-muscles-list { display: flex; flex-wrap: wrap; gap: 5px; }
