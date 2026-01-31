@@ -82,6 +82,7 @@ function renderCurrentTab(tab) {
   if (tab === "exercises") renderExerciseLibrary();
   if (tab === "history") renderHistory();
   if (tab === "stats") renderStats();
+  if (tab === "settings") renderSettings();
 }
 
 // --- DASHBOARD ---
@@ -809,7 +810,7 @@ function stopTimer() {
 $("#btnStartEmpty").addEventListener("click", () => startWorkout());
 $("#btnStartTemplate").addEventListener("click", () => {
   const tId = $("#templateSelect").value;
-  if (!tId) return alert("Select a template");
+  if (!tId) return alert("Select a routine");
   startWorkout(DB.templates[tId]);
 });
 
@@ -1258,13 +1259,13 @@ function findLastSessionWithExercise(exId) {
 
 // --- TEMPLATES ---
 $("#btnSaveTemplate").addEventListener("click", () => {
-    const name = prompt("Name this template:");
+    const name = prompt("Name this routine:");
     if(!name) return;
     const tId = uid();
     const exercises = ACTIVE_SESSION.order.map(id => ({ exId: id }));
     DB.templates[tId] = { id: tId, name, exercises };
     saveDB();
-    alert("Template saved.");
+    alert("Routine saved.");
 });
 
 function renderTemplates() {
@@ -1289,7 +1290,7 @@ function renderTemplates() {
 }
 
 function deleteTemplate(id) {
-    if(!confirm("Delete template?")) return;
+    if(!confirm("Delete routine?")) return;
     delete DB.templates[id];
     saveDB();
     renderTemplates();
@@ -1303,7 +1304,7 @@ $("#btnNewTemplate").addEventListener("click", () => {
   _templateBuilderExercises = [];
   _editingTemplateId = null;
   $("#templateBuilderName").value = "";
-  $("#templateBuilderTitle").textContent = "CREATE TEMPLATE";
+  $("#templateBuilderTitle").textContent = "CREATE ROUTINE";
   renderTemplateBuilderList();
   $("#templateBuilderModal").classList.remove("hidden");
   document.body.style.overflow = "hidden";
@@ -1316,7 +1317,7 @@ function editTemplate(id) {
   _editingTemplateId = id;
   _templateBuilderExercises = template.exercises.map(e => e.exId);
   $("#templateBuilderName").value = template.name;
-  $("#templateBuilderTitle").textContent = "EDIT TEMPLATE";
+  $("#templateBuilderTitle").textContent = "EDIT ROUTINE";
   renderTemplateBuilderList();
   $("#templateBuilderModal").classList.remove("hidden");
   document.body.style.overflow = "hidden";
@@ -1379,7 +1380,7 @@ function renderTemplateBuilderList() {
 $("#btnCloseTemplateBuilder").addEventListener("click", () => {
   // Warn if exercises have been added
   if (_templateBuilderExercises.length > 0) {
-    if (!confirm("You have exercises added. Discard this template?")) return;
+    if (!confirm("You have exercises added. Discard this routine?")) return;
   }
   $("#templateBuilderModal").classList.add("hidden");
   document.body.style.overflow = "";
@@ -1390,7 +1391,7 @@ $("#templateBuilderModal").addEventListener("click", (e) => {
   if (e.target === $("#templateBuilderModal")) {
     // Warn if exercises have been added
     if (_templateBuilderExercises.length > 0) {
-      if (!confirm("You have exercises added. Discard this template?")) return;
+      if (!confirm("You have exercises added. Discard this routine?")) return;
     }
     $("#templateBuilderModal").classList.add("hidden");
     document.body.style.overflow = "";
@@ -1400,7 +1401,7 @@ $("#templateBuilderModal").addEventListener("click", (e) => {
 $("#btnSaveTemplateBuilder").addEventListener("click", () => {
   const name = $("#templateBuilderName").value.trim();
   if (!name) {
-    alert("Please enter a template name");
+    alert("Please enter a routine name");
     return;
   }
   if (_templateBuilderExercises.length === 0) {
@@ -1618,9 +1619,6 @@ function renderStats() {
 
     // Render breakdown chart
     renderBreakdownChart();
-
-    // Load settings
-    loadSettings();
 }
 
 function updateStatsChart() {
@@ -1915,6 +1913,7 @@ function openExercisePicker(cb, cancelCb = null) {
     _pickerFilter = "All";
     $("#pickerSearch").value = "";
     $("#pickerModal").classList.remove("hidden");
+    document.body.style.overflow = "hidden"; // Prevent background scroll
     renderPickerTabs();
     renderPickerList();
 }
@@ -2004,6 +2003,7 @@ function renderPickerList() {
             btn.onclick = () => {
                 if(_pickerCallback) _pickerCallback(ex.id);
                 $("#pickerModal").classList.add("hidden");
+                document.body.style.overflow = ""; // Restore scroll
             };
             div.appendChild(btn);
         });
@@ -2022,6 +2022,7 @@ function renderPickerList() {
 
 $("#pickerClose").addEventListener("click", () => {
   $("#pickerModal").classList.add("hidden");
+  document.body.style.overflow = ""; // Restore scroll
   if (_pickerCancelCallback) {
     _pickerCancelCallback();
     _pickerCancelCallback = null;
@@ -2044,8 +2045,9 @@ $("#btnTheme").addEventListener("click", () => {
    }
 });
 
-// Timer Toggle - Show/hide time display
-$("#btnToggleTimer").addEventListener("click", () => {
+// Timer Toggle - Show/hide time display (only on clock icon click)
+$("#btnToggleTimer").addEventListener("click", (e) => {
+  e.stopPropagation(); // Prevent event bubbling
   $("#timerDisplay").classList.toggle("hidden");
 });
 
@@ -2090,21 +2092,10 @@ $("#breakdownHeader").addEventListener("click", () => {
   icon.classList.toggle("collapsed");
 });
 
-// Settings section toggle
-$("#settingsHeader").addEventListener("click", () => {
-  const content = $("#settingsContent");
-  const icon = $("#settingsToggle");
-  content.classList.toggle("collapsed");
-  icon.classList.toggle("collapsed");
-});
-
-// Data section toggle
-$("#dataHeader").addEventListener("click", () => {
-  const content = $("#dataContent");
-  const icon = $("#dataToggle");
-  content.classList.toggle("collapsed");
-  icon.classList.toggle("collapsed");
-});
+// --- SETTINGS TAB ---
+function renderSettings() {
+  loadSettings();
+}
 
 // --- SETTINGS ---
 function loadSettings() {
@@ -2285,6 +2276,7 @@ let _exerciseHistoryExpanded = false; // Whether to show all exercise history
 
 function getBreakdownPeriodInfo() {
   const period = $("#breakdownPeriod").value;
+  const granularity = $("#breakdownGranularity").value;
   const now = new Date();
   let startDate, endDate, labels = [], labelText;
 
@@ -2314,15 +2306,21 @@ function getBreakdownPeriodInfo() {
     const targetMonth = new Date(now.getFullYear(), now.getMonth() + _breakdownOffset, 1);
     startDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth(), 1);
     endDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth() + 1, 0);
-    const daysInMonth = endDate.getDate();
-
-    for (let i = 1; i <= daysInMonth; i++) {
-      labels.push(i.toString());
-    }
 
     const monthNames = ["January", "February", "March", "April", "May", "June",
       "July", "August", "September", "October", "November", "December"];
     labelText = `${monthNames[targetMonth.getMonth()]} ${targetMonth.getFullYear()}`;
+
+    if (granularity === "weekly") {
+      // Group by weeks within the month
+      labels = ["Wk 1", "Wk 2", "Wk 3", "Wk 4", "Wk 5"];
+    } else {
+      // Daily view
+      const daysInMonth = endDate.getDate();
+      for (let i = 1; i <= daysInMonth; i++) {
+        labels.push(i.toString());
+      }
+    }
 
   } else { // year
     const targetYear = now.getFullYear() + _breakdownOffset;
@@ -2332,14 +2330,14 @@ function getBreakdownPeriodInfo() {
     labelText = targetYear.toString();
   }
 
-  return { startDate, endDate, labels, labelText, period };
+  return { startDate, endDate, labels, labelText, period, granularity };
 }
 
 function renderBreakdownChart() {
   const canvas = $("#breakdownChart");
   if (!canvas) return;
 
-  const { startDate, endDate, labels, labelText, period } = getBreakdownPeriodInfo();
+  const { startDate, endDate, labels, labelText, period, granularity } = getBreakdownPeriodInfo();
   $("#breakdownPeriodLabel").textContent = labelText;
 
   const mode = $("#breakdownMode").value; // "volume" or "sets"
@@ -2384,7 +2382,7 @@ function renderBreakdownChart() {
   // Calculate data based on mode
   sessions.forEach(s => {
     const sessionDate = new Date(s.start);
-    let idx = getBreakdownIndex(sessionDate, startDate, period, labels.length);
+    let idx = getBreakdownIndex(sessionDate, startDate, period, labels.length, granularity);
 
     Object.entries(s.entries || {}).forEach(([exId, sets]) => {
       const ex = DB.exercises[exId];
@@ -2439,7 +2437,9 @@ function renderBreakdownChart() {
     });
   });
 
-  drawHiResStackedBarChart(ctx, w, h, labels, muscleData, allGroups, textColor, isDark);
+  // Use roundTo=10 for sets mode, 100 for volume mode
+  const roundTo = mode === "sets" ? 10 : 100;
+  drawHiResStackedBarChart(ctx, w, h, labels, muscleData, allGroups, textColor, isDark, roundTo);
 
   // Render clickable legend styled like tabs
   const legendContainer = $("#breakdownLegend");
@@ -2506,11 +2506,16 @@ function renderBreakdownChart() {
   $("#breakdownCardio").innerHTML = "";
 }
 
-function getBreakdownIndex(date, startDate, period, maxLabels) {
+function getBreakdownIndex(date, startDate, period, maxLabels, granularity = "daily") {
   if (period === "week") {
     const diff = Math.floor((date - startDate) / (1000 * 60 * 60 * 24));
     return Math.max(0, Math.min(6, diff));
   } else if (period === "month") {
+    if (granularity === "weekly") {
+      // Get week number within month (0-4)
+      const dayOfMonth = date.getDate();
+      return Math.min(Math.floor((dayOfMonth - 1) / 7), 4);
+    }
     return Math.min(date.getDate() - 1, maxLabels - 1);
   } else {
     return date.getMonth();
@@ -2570,7 +2575,7 @@ function drawHiResBarChart(ctx, w, h, labels, values, color, textColor, isDark) 
   });
 }
 
-function drawHiResStackedBarChart(ctx, w, h, labels, muscleData, groups, textColor, isDark) {
+function drawHiResStackedBarChart(ctx, w, h, labels, muscleData, groups, textColor, isDark, roundTo = 100) {
   const padding = { top: 20, right: 20, bottom: 40, left: 55 };
   const chartW = w - padding.left - padding.right;
   const chartH = h - padding.top - padding.bottom;
@@ -2584,9 +2589,9 @@ function drawHiResStackedBarChart(ctx, w, h, labels, muscleData, groups, textCol
       return sum + (muscleData[muscle]?.[i] || 0);
     }, 0);
   });
-  const maxVal = Math.max(...totals) || 100;
-  // Round max to nearest 100
-  const roundedMax = Math.ceil(maxVal / 100) * 100 || 100;
+  const maxVal = Math.max(...totals) || roundTo;
+  // Round max to specified value (100 for volume, 10 for sets)
+  const roundedMax = Math.ceil(maxVal / roundTo) * roundTo || roundTo;
 
   const barWidth = chartW / labels.length * 0.7;
   const gap = chartW / labels.length * 0.15;
@@ -2642,8 +2647,16 @@ function drawHiResStackedBarChart(ctx, w, h, labels, muscleData, groups, textCol
 // Breakdown chart controls
 $("#breakdownPeriod").addEventListener("change", () => {
   _breakdownOffset = 0; // Reset to current period when changing type
+  // Show/hide granularity selector for month view
+  const granularitySelect = $("#breakdownGranularity");
+  if ($("#breakdownPeriod").value === "month") {
+    granularitySelect.classList.remove("hidden");
+  } else {
+    granularitySelect.classList.add("hidden");
+  }
   renderBreakdownChart();
 });
+$("#breakdownGranularity").addEventListener("change", renderBreakdownChart);
 $("#breakdownMode").addEventListener("change", renderBreakdownChart);
 
 // Period navigation
