@@ -1674,9 +1674,11 @@ function updateStatsChart() {
     const history = historyForDisplay.slice().reverse();
 
     // Render history list (newest first)
+    const toggleContainer = $("#exerciseHistoryToggle");
     if (historyContainer) {
         if (historyForDisplay.length === 0) {
             historyContainer.innerHTML = '<p class="muted">No history for this exercise yet.</p>';
+            if (toggleContainer) toggleContainer.innerHTML = '';
         } else {
             const showAll = _exerciseHistoryExpanded;
             const itemsToShow = showAll ? historyForDisplay : historyForDisplay.slice(0, 3);
@@ -1696,30 +1698,35 @@ function updateStatsChart() {
                 }).join('');
                 html += `<div class="ex-history-item"><div class="ex-history-date"><strong>${dateStr}</strong></div><div class="ex-history-sets">${setsHtml}</div></div>`;
             });
-
-            if (remaining > 0) {
-                if (showAll) {
-                    html += `<button class="btn-ghost small expand-history" id="btnCollapseHistory">▲ Show less</button>`;
-                } else {
-                    html += `<button class="btn-ghost small expand-history" id="btnExpandHistory">▼ + ${remaining} more sessions</button>`;
-                }
-            }
             historyContainer.innerHTML = html;
 
-            // Add click handlers
-            const expandBtn = $("#btnExpandHistory");
-            const collapseBtn = $("#btnCollapseHistory");
-            if (expandBtn) {
-                expandBtn.onclick = () => {
-                    _exerciseHistoryExpanded = true;
-                    updateStatsChart();
-                };
-            }
-            if (collapseBtn) {
-                collapseBtn.onclick = () => {
-                    _exerciseHistoryExpanded = false;
-                    updateStatsChart();
-                };
+            // Render toggle button in separate container (outside scrollable area)
+            if (toggleContainer) {
+                if (remaining > 0) {
+                    if (showAll) {
+                        toggleContainer.innerHTML = `<button class="btn-ghost small expand-history" id="btnCollapseHistory">▲ Show less</button>`;
+                    } else {
+                        toggleContainer.innerHTML = `<button class="btn-ghost small expand-history" id="btnExpandHistory">▼ + ${remaining} more sessions</button>`;
+                    }
+                } else {
+                    toggleContainer.innerHTML = '';
+                }
+
+                // Add click handlers
+                const expandBtn = $("#btnExpandHistory");
+                const collapseBtn = $("#btnCollapseHistory");
+                if (expandBtn) {
+                    expandBtn.onclick = () => {
+                        _exerciseHistoryExpanded = true;
+                        updateStatsChart();
+                    };
+                }
+                if (collapseBtn) {
+                    collapseBtn.onclick = () => {
+                        _exerciseHistoryExpanded = false;
+                        updateStatsChart();
+                    };
+                }
             }
         }
     }
@@ -1758,7 +1765,7 @@ function updateStatsChart() {
     for (let i = 0; i <= numSteps; i++) {
         const val = roundedMin + (i / numSteps) * finalRange;
         const y = padding.top + chartH - (i / numSteps) * chartH;
-        ctx.fillText(Math.round(val).toLocaleString(), padding.left - 8, y + 4);
+        ctx.fillText(formatAxisValue(val), padding.left - 8, y + 4);
         ctx.strokeStyle = isDark ? "#333" : "#ddd";
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -2164,6 +2171,16 @@ function convertWeight(kg) {
   return parseFloat(kg);
 }
 
+// Format Y-axis values with K abbreviation for large numbers
+function formatAxisValue(val) {
+  if (val >= 10000) {
+    return (val / 1000).toFixed(0) + 'K';
+  } else if (val >= 1000) {
+    return (val / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+  }
+  return Math.round(val).toLocaleString();
+}
+
 function formatWeight(kg) {
   // Format kg value with unit label
   if (DB.user.useLbs) {
@@ -2556,7 +2573,7 @@ function drawHiResBarChart(ctx, w, h, labels, values, color, textColor, isDark) 
   for (let i = 0; i <= steps; i++) {
     const val = (roundedMax / steps) * i;
     const y = padding.top + chartH - (i / steps) * chartH;
-    ctx.fillText(Math.round(val).toLocaleString(), padding.left - 8, y + 4);
+    ctx.fillText(formatAxisValue(val), padding.left - 8, y + 4);
     ctx.strokeStyle = isDark ? "#333" : "#ddd";
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -2616,7 +2633,7 @@ function drawHiResStackedBarChart(ctx, w, h, labels, muscleData, groups, textCol
   for (let i = 0; i <= steps; i++) {
     const val = (roundedMax / steps) * i;
     const y = padding.top + chartH - (i / steps) * chartH;
-    ctx.fillText(Math.round(val).toLocaleString(), padding.left - 8, y + 4);
+    ctx.fillText(formatAxisValue(val), padding.left - 8, y + 4);
     ctx.strokeStyle = isDark ? "#333" : "#ddd";
     ctx.lineWidth = 1;
     ctx.beginPath();
