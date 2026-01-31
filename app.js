@@ -1840,22 +1840,49 @@ function renderPickerList() {
         })
         .sort((a, b) => a.name.localeCompare(b.name));
 
-    if (filtered.length === 0) {
-        div.innerHTML = '<p class="muted" style="padding: 10px;">No exercises found</p>';
+    // Check if no exercises exist at all
+    const allExercises = Object.values(DB.exercises);
+    if (allExercises.length === 0) {
+        div.innerHTML = `
+            <p class="muted" style="padding: 10px;">No exercises yet!</p>
+            <div class="picker-item picker-create-new" id="pickerGoToExercises">+ CREATE YOUR FIRST EXERCISE</div>
+        `;
+        div.querySelector("#pickerGoToExercises").onclick = () => {
+            $("#pickerModal").classList.add("hidden");
+            $(".tab[data-tab='exercises']").click();
+            // Small delay then open the add exercise modal
+            setTimeout(() => $("#btnShowAddEx").click(), 100);
+        };
         return;
     }
 
-    filtered.forEach(ex => {
-        const btn = document.createElement("div");
-        const colorClass = ex.type === "cardio" ? "Cardio" : (ex.muscle || 'Other');
-        btn.className = `picker-item ex-cat-${colorClass}`;
-        btn.textContent = ex.name;
-        btn.onclick = () => {
-            if(_pickerCallback) _pickerCallback(ex.id);
-            $("#pickerModal").classList.add("hidden");
-        };
-        div.appendChild(btn);
-    });
+    // Show filtered exercises
+    if (filtered.length === 0) {
+        div.innerHTML = '<p class="muted" style="padding: 10px;">No exercises match this filter</p>';
+    } else {
+        filtered.forEach(ex => {
+            const btn = document.createElement("div");
+            const colorClass = ex.type === "cardio" ? "Cardio" : (ex.muscle || 'Other');
+            btn.className = `picker-item ex-cat-${colorClass}`;
+            btn.textContent = ex.name;
+            btn.onclick = () => {
+                if(_pickerCallback) _pickerCallback(ex.id);
+                $("#pickerModal").classList.add("hidden");
+            };
+            div.appendChild(btn);
+        });
+    }
+
+    // Always add option to create new exercise at the bottom
+    const createBtn = document.createElement("div");
+    createBtn.className = "picker-item picker-create-new";
+    createBtn.textContent = "+ ADD NEW EXERCISE";
+    createBtn.onclick = () => {
+        $("#pickerModal").classList.add("hidden");
+        $(".tab[data-tab='exercises']").click();
+        setTimeout(() => $("#btnShowAddEx").click(), 100);
+    };
+    div.appendChild(createBtn);
 }
 
 $("#pickerClose").addEventListener("click", () => {
