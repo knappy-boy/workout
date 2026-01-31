@@ -378,7 +378,7 @@ function showDayDetails(iso, workouts) {
         return "";
       }).join("");
 
-      html += `<div class="day-exercise"><strong>${ex.name}</strong> <span class="muscle-tag" style="background:${color}">${category}</span><br>${setsHtml}</div>`;
+      html += `<div class="day-exercise"><strong>${ex.name}</strong> <span class="muscle-tag" style="background:${color}">${category}</span><div style="margin-top:8px">${setsHtml}</div></div>`;
     });
   });
 
