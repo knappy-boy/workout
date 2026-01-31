@@ -1045,21 +1045,39 @@ function addLogRow(ex, data = null, isGhost = false, prevWeight = null) {
 
   row.innerHTML = `
     <div class="text-center font-bold index-num">#</div>
-    <input class="neo-input input-val-1 ${ghostClass}" type="number" step="${ex.increment || 1}" inputmode="decimal" ${valueStr1}>
-    <input class="neo-input input-val-2 ${ghostClass}" type="number" inputmode="numeric" ${valueStr2}>
+    <input class="neo-input input-val-1 ${ghostClass}" type="text" inputmode="decimal" ${valueStr1}>
+    <input class="neo-input input-val-2 ${ghostClass}" type="text" inputmode="numeric" ${valueStr2}>
     <button class="btn-ghost text-red remove-row">✕</button>
   `;
 
   // Remove ghost class on input and filter non-numeric
-  row.querySelectorAll("input").forEach(inp => {
-      inp.addEventListener("input", (e) => {
-        inp.classList.remove("ghost-val");
-        // Strip non-numeric characters (allow decimal point for weight)
-        e.target.value = e.target.value.replace(/[^0-9.]/g, '');
-      });
+  const val1Input = row.querySelector(".input-val-1");
+  const val2Input = row.querySelector(".input-val-2");
+
+  val1Input.addEventListener("input", (e) => {
+    val1Input.classList.remove("ghost-val");
+    // Allow only digits and one decimal point for weight
+    let val = e.target.value;
+    // Remove anything that's not a digit or decimal
+    val = val.replace(/[^0-9.]/g, '');
+    // Ensure only one decimal point
+    const parts = val.split('.');
+    if (parts.length > 2) {
+      val = parts[0] + '.' + parts.slice(1).join('');
+    }
+    e.target.value = val;
   });
 
-  row.querySelector(".remove-row").addEventListener("click", () => row.remove());
+  val2Input.addEventListener("input", (e) => {
+    val2Input.classList.remove("ghost-val");
+    // Only digits for reps/distance
+    e.target.value = e.target.value.replace(/[^0-9]/g, '');
+  });
+
+  row.querySelector(".remove-row").addEventListener("click", () => {
+    row.remove();
+    renumberRows(); // Renumber remaining rows after deletion
+  });
   $("#logRows").appendChild(row);
   renumberRows();
 }
@@ -1360,12 +1378,18 @@ function renderHistory() {
         ? `<span class="template-badge">${sess.templateName}</span>`
         : '<span class="template-badge freestyle">Freestyle</span>';
 
+      // Count only exercises that actually have logged entries
+      const loggedExerciseCount = (sess.order || []).filter(exId =>
+        sess.entries[exId] && sess.entries[exId].length > 0
+      ).length;
+      const exerciseWord = loggedExerciseCount === 1 ? 'exercise' : 'exercises';
+
       div.innerHTML = `
         <div class="row">
           <div class="history-date">${date}${durationStr ? ` <span class="muted small">(${durationStr})</span>` : ''}</div>
           <button class="btn-ghost small text-red" onclick="deleteWorkout(${idx})">DELETE</button>
         </div>
-        <div class="history-meta">${templateBadge} · ${(sess.order||[]).length} exercises</div>
+        <div class="history-meta">${templateBadge} · ${loggedExerciseCount} ${exerciseWord}</div>
         ${details}
       `;
       content.appendChild(div);
@@ -1464,8 +1488,11 @@ function updateStatsChart() {
     const ex = DB.exercises[exId];
 
     // Extract history - calculate total volume (weight × reps)
-    const history = [];
-    DB.sessions.slice().reverse().forEach(s => {
+    // Sessions are stored newest-first, so iterate in order for chart (oldest to newest)
+    // but keep a separate array for display (newest first)
+    const historyForChart = [];
+    const historyForDisplay = [];
+    DB.sessions.forEach(s => {
         if(s.entries && s.entries[exId] && s.entries[exId].length > 0) {
             let totalVolume = 0;
             const sets = s.entries[exId];
@@ -1474,17 +1501,19 @@ function updateStatsChart() {
                 const reps = parseInt(set.r || 0);
                 totalVolume += weight * reps;
             });
-            history.push({ date: s.start, volume: totalVolume, sets: sets });
+            historyForDisplay.push({ date: s.start, volume: totalVolume, sets: sets });
         }
     });
+    // Chart needs oldest-first, display needs newest-first
+    const history = historyForDisplay.slice().reverse();
 
-    // Render history list
+    // Render history list (newest first)
     if (historyContainer) {
-        if (history.length === 0) {
+        if (historyForDisplay.length === 0) {
             historyContainer.innerHTML = '<p class="muted">No history for this exercise yet.</p>';
         } else {
             let html = '<h3 class="mb-2">LIFT HISTORY</h3>';
-            history.slice(0, 3).forEach(h => {
+            historyForDisplay.slice(0, 3).forEach(h => {
                 const date = new Date(h.date);
                 const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
                 const setsHtml = h.sets.map(s => {
@@ -1494,8 +1523,8 @@ function updateStatsChart() {
                 }).join('');
                 html += `<div class="ex-history-item"><strong>${dateStr}</strong> ${setsHtml}</div>`;
             });
-            if (history.length > 3) {
-                html += `<p class="muted small">+ ${history.length - 3} more sessions</p>`;
+            if (historyForDisplay.length > 3) {
+                html += `<p class="muted small">+ ${historyForDisplay.length - 3} more sessions</p>`;
             }
             historyContainer.innerHTML = html;
         }
@@ -1793,6 +1822,21 @@ function getLatestBodyweight() {
   if (DB.bodyweight.length === 0) return null;
   return DB.bodyweight[DB.bodyweight.length - 1].kg;
 }
+
+// Handle orientation change to fix calendar width glitch
+window.addEventListener("orientationchange", () => {
+  setTimeout(() => {
+    if ($("#tab-dashboard").classList.contains("active")) {
+      renderCalendar();
+    }
+  }, 100);
+});
+
+window.addEventListener("resize", () => {
+  if ($("#tab-dashboard").classList.contains("active")) {
+    renderCalendar();
+  }
+});
 
 // Initialization
 migrateExerciseCategories();

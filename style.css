@@ -149,9 +149,9 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 
 /* MODALS & DRAWERS */
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; display: flex; justify-content: center; }
-.neo-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); border: var(--border); box-shadow: var(--shadow); background: var(--white); padding: 0; z-index: 201; width: 90%; max-width: 400px; color: var(--black); }
+.neo-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); border: var(--border); box-shadow: var(--shadow); background: var(--white); padding: 0; z-index: 201; width: 90%; max-width: 400px; max-height: 80vh; color: var(--black); display: flex; flex-direction: column; }
 .neo-modal::backdrop { background: rgba(0,0,0,0.8); }
-.modal-content { padding: 20px; }
+.modal-content { padding: 20px; overflow-y: auto; flex: 1; }
 
 /* BOTTOM DRAWER FOR LOGGING */
 .drawer { 
@@ -171,8 +171,8 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .theme-dark .ghost-val { color: rgba(255,255,255,0.4); }
 
 /* CALENDAR */
-.calendar-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 4px; text-align: center; font-weight: bold; font-size: 0.75rem; }
-.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.calendar-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 4px; text-align: center; font-weight: bold; font-size: 0.75rem; width: 100%; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; width: 100%; overflow: hidden; }
 .cal-day { aspect-ratio: 1; border: 1px solid #1a1a1a; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.8rem; background: #fff; color: #1a1a1a; cursor: pointer; padding: 2px; }
 .cal-day.empty { background: transparent; border: none; cursor: default; }
 .cal-day.has-workout { background: #1a1a1a; color: #fff; font-weight: bold; }
