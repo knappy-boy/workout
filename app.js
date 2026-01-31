@@ -578,7 +578,7 @@ function renderLibraryTabs() {
 // Library search listener
 $("#searchEx").addEventListener("input", renderExerciseLibrary);
 
-$("#btnShowAddEx").addEventListener("click", () => {
+function openNewExerciseModal() {
   // Reset form for new exercise
   EDITING_EXERCISE_ID = null;
   $("#exModalTitle").textContent = "NEW EXERCISE";
@@ -595,7 +595,9 @@ $("#btnShowAddEx").addEventListener("click", () => {
   $("#btnDeleteEx").classList.add("hidden"); // Hide delete for new exercise
   $("#addExModal").classList.remove("hidden");
   document.body.style.overflow = "hidden";
-});
+}
+
+$("#btnShowAddEx").addEventListener("click", openNewExerciseModal);
 
 $("#btnCloseExModal").addEventListener("click", () => {
   EDITING_EXERCISE_ID = null;
@@ -1849,9 +1851,7 @@ function renderPickerList() {
         `;
         div.querySelector("#pickerGoToExercises").onclick = () => {
             $("#pickerModal").classList.add("hidden");
-            $(".tab[data-tab='exercises']").click();
-            // Small delay then open the add exercise modal
-            setTimeout(() => $("#btnShowAddEx").click(), 100);
+            openNewExerciseModal();
         };
         return;
     }
@@ -1879,8 +1879,7 @@ function renderPickerList() {
     createBtn.textContent = "+ ADD NEW EXERCISE";
     createBtn.onclick = () => {
         $("#pickerModal").classList.add("hidden");
-        $(".tab[data-tab='exercises']").click();
-        setTimeout(() => $("#btnShowAddEx").click(), 100);
+        openNewExerciseModal();
     };
     div.appendChild(createBtn);
 }
