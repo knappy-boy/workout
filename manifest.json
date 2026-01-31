@@ -1,15 +1,29 @@
 {
-  "name": "LiftLog (Offline)",
+  "name": "LiftLog Ultra",
   "short_name": "LiftLog",
+  "description": "Brutalist workout tracker",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#0b0b0b",
-  "theme_color": "#0b0b0b",
+  "background_color": "#f4f4f4",
+  "theme_color": "#FF3333",
   "icons": [
     {
-      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAr0lEQVR4nO3aQQrCMBQF0P//0y5pQ0oQOq0o0cC4Jm4rWc3kOQf6wq2yqzv7gCwAAAAAAAAAAAAAAAIAvhTqkWcYbG8b9y6w0b0gqf5kYtYfQ4+qQJm7p3FQhY2i3rRz9x6m7z1Q2c8mXcJm4xq6Qm1dV9j0u0mJ9bVwHkz3u2QwAAAAAAAAAAAAAAAPwB0yUQ6g4mEwAAAABJRU5ErkJggg==",
-      "sizes": "64x64",
-      "type": "image/png"
+      "src": "icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ]
 }

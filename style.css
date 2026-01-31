@@ -234,7 +234,7 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .theme-dark .day-exercise { border-color: #333; }
 
 /* EXERCISE HISTORY IN STATS */
-.exercise-history { max-height: 300px; overflow-y: auto; }
+.exercise-history { max-height: 300px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .ex-history-item { padding: 8px 0; border-bottom: 1px solid #eee; display: grid; grid-template-columns: 85px 1fr; gap: 8px; align-items: baseline; }
 .ex-history-item:last-child { border-bottom: none; }
 .theme-dark .ex-history-item { border-color: #333; }
@@ -277,7 +277,7 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 
 /* BODYWEIGHT CHART */
 .bw-period-tabs { display: flex; gap: 5px; }
-.bw-period-tab { padding: 5px 12px; border: 2px solid #ccc; background: transparent; font-size: 0.8rem; font-weight: 700; cursor: pointer; border-radius: 99px; }
+.bw-period-tab { padding: 5px 12px; border: 2px solid #ccc; background: transparent; font-size: 0.8rem; font-weight: 700; cursor: pointer; border-radius: 99px; color: #000; }
 .bw-period-tab.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
 .theme-dark .bw-period-tab { border-color: #555; color: #fff; }
 .theme-dark .bw-period-tab.active { background: #fff; color: #000; border-color: #fff; }
@@ -353,7 +353,7 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .unit-toggle input:not(:checked) ~ .unit-label-lbs { opacity: 0.35; }
 .unit-toggle-track { position: relative; width: 40px; height: 22px; background: #ccc; border: 2px solid #000; transition: background 0.2s; }
 .unit-toggle-track:before { content: ""; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px; background: #000; transition: transform 0.2s; }
-.unit-toggle input:checked + .unit-toggle-track:before { transform: translateX(18px); }
+.unit-toggle input:checked ~ .unit-toggle-track:before { transform: translateX(18px); }
 .theme-dark .unit-toggle-track { border-color: #fff; }
 .theme-dark .unit-toggle-track:before { background: #fff; }
 

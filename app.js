@@ -2490,8 +2490,17 @@ function getBreakdownPeriodInfo() {
     const targetYear = now.getFullYear() + _breakdownOffset;
     startDate = new Date(targetYear, 0, 1);
     endDate = new Date(targetYear, 11, 31);
-    labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     labelText = targetYear.toString();
+
+    if (granularity === "weekly") {
+      // 52 weeks in a year
+      for (let i = 1; i <= 52; i++) {
+        labels.push(i.toString());
+      }
+    } else {
+      // Monthly view (default)
+      labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    }
   }
 
   return { startDate, endDate, labels, labelText, period, granularity };
@@ -2681,7 +2690,13 @@ function getBreakdownIndex(date, startDate, period, maxLabels, granularity = "da
       return Math.min(Math.floor((dayOfMonth - 1) / 7), 4);
     }
     return Math.min(date.getDate() - 1, maxLabels - 1);
-  } else {
+  } else { // year
+    if (granularity === "weekly") {
+      // Get week number within year (0-51)
+      const startOfYear = new Date(date.getFullYear(), 0, 1);
+      const dayOfYear = Math.floor((date - startOfYear) / (1000 * 60 * 60 * 24));
+      return Math.min(Math.floor(dayOfYear / 7), 51);
+    }
     return date.getMonth();
   }
 }
@@ -2811,10 +2826,24 @@ function drawHiResStackedBarChart(ctx, w, h, labels, muscleData, groups, textCol
 // Breakdown chart controls
 $("#breakdownPeriod").addEventListener("change", () => {
   _breakdownOffset = 0; // Reset to current period when changing type
-  // Show/hide granularity selector for month view
+  const period = $("#breakdownPeriod").value;
   const granularitySelect = $("#breakdownGranularity");
-  if ($("#breakdownPeriod").value === "month") {
+
+  // Show granularity selector for month and year views
+  if (period === "month") {
     granularitySelect.classList.remove("hidden");
+    // Set options for month: daily/weekly
+    granularitySelect.innerHTML = `
+      <option value="daily">Daily</option>
+      <option value="weekly">Weekly</option>
+    `;
+  } else if (period === "year") {
+    granularitySelect.classList.remove("hidden");
+    // Set options for year: weekly/monthly
+    granularitySelect.innerHTML = `
+      <option value="weekly">Weekly</option>
+      <option value="monthly">Monthly</option>
+    `;
   } else {
     granularitySelect.classList.add("hidden");
   }

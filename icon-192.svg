@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <style>
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #1a1a1a; }
+      .text { fill: #ffffff; }
+      .outline { fill: none; stroke: #ffffff; stroke-width: 2; }
+    }
+  </style>
+  <rect class="bg" width="192" height="192" fill="#ffffff"/>
+  <text class="text" x="96" y="85" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="900" font-style="italic" fill="#1a1a1a">LIFT</text>
+  <text class="outline" x="96" y="140" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="900" font-style="italic" fill="none" stroke="#1a1a1a" stroke-width="2">LOG</text>
+</svg>

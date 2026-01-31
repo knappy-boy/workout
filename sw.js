@@ -1,12 +1,15 @@
 // Change this version string EVERY time you update your code
-const CACHE = "liftlog-ultra-v30";
+const CACHE = "liftlog-ultra-v31";
 
 const ASSETS = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
-  "./manifest.json"
+  "./manifest.json",
+  "./icon-192.svg",
+  "./icon-512.svg",
+  "./icon-maskable.svg"
 ];
 
 self.addEventListener("install", (event) => {
