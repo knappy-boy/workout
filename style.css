@@ -325,6 +325,8 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .setting-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #eee; }
 .setting-row:last-child { border-bottom: none; }
 .theme-dark .setting-row { border-color: #333; }
+.setting-hint { font-size: 0.75rem; color: #888; margin-top: 2px; }
+.theme-dark .setting-hint { color: #666; }
 
 /* Toggle switch */
 .toggle-switch { position: relative; display: inline-block; width: 50px; height: 28px; }
@@ -334,11 +336,33 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .toggle-switch input:checked + .toggle-slider { background: var(--red); }
 .toggle-switch input:checked + .toggle-slider:before { transform: translateX(22px); background: #fff; }
 
-/* Breakdown legend */
-.breakdown-legend { display: flex; flex-wrap: wrap; gap: 8px; }
-.legend-item { display: flex; align-items: center; gap: 4px; font-size: 0.75rem; }
-.legend-dot, .legend-color { width: 12px; height: 12px; border: 1px solid #000; }
-.theme-dark .legend-dot, .theme-dark .legend-color { border-color: #fff; }
+/* Breakdown period label */
+.breakdown-period-label { font-weight: 700; font-size: 0.9rem; text-transform: uppercase; }
+
+/* Breakdown legend - styled like picker tabs */
+.breakdown-legend { display: flex; flex-wrap: wrap; gap: 6px; }
+.legend-tab {
+  padding: 4px 10px;
+  border: 2px solid #ccc;
+  background: transparent;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 99px;
+  color: #000;
+  transition: all 0.15s;
+}
+.legend-tab.active { color: #000; }
+.legend-tab.inactive { opacity: 0.4; }
+.theme-dark .legend-tab { color: #fff; border-color: #555; }
+.theme-dark .legend-tab.inactive { opacity: 0.3; }
+
+/* Breakdown cardio summary */
+.breakdown-cardio { font-size: 0.85rem; color: #666; }
+.theme-dark .breakdown-cardio { color: #999; }
+
+/* Unit label for inputs */
+.unit-label { font-weight: 700; font-size: 0.9rem; margin-left: -5px; margin-right: 10px; }
 
 /* Secondary muscles for compound exercises */
 .secondary-muscles-list { display: flex; flex-wrap: wrap; gap: 5px; }

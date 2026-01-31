@@ -11,8 +11,9 @@ const DEFAULT_DB = {
   user: {
     theme: "light",
     increment: 2.5,
-    unit: "kg",           // kg or lbs
+    useLbs: false,        // false = kg, true = lbs
     showSuggestions: true,
+    includeCompound: true, // include secondary muscles in charts
     trainingGoal: "hypertrophy", // hypertrophy or strength
     bodyweight: null      // user's bodyweight for assisted exercises
   },
@@ -44,10 +45,12 @@ function loadDB() {
   if (!data.user) data.user = { theme: "light" };
 
   // Migrate user settings
-  if (data.user.unit === undefined) data.user.unit = "kg";
+  if (data.user.useLbs === undefined) data.user.useLbs = data.user.unit === "lbs" || false;
   if (data.user.showSuggestions === undefined) data.user.showSuggestions = true;
+  if (data.user.includeCompound === undefined) data.user.includeCompound = true;
   if (data.user.trainingGoal === undefined) data.user.trainingGoal = "hypertrophy";
   if (data.user.bodyweight === undefined) data.user.bodyweight = null;
+  delete data.user.unit; // Remove old unit setting
 
   // Apply theme immediately
   document.body.className = `theme-${data.user.theme}`;
@@ -150,8 +153,10 @@ function populateDashboardTemplates() {
 }
 
 $("#btnLogBW").addEventListener("click", () => {
-  const kg = parseFloat($("#bwInput").value);
-  if (!kg) return;
+  const inputVal = parseFloat($("#bwInput").value);
+  if (!inputVal) return;
+  // Convert to kg if user is using lbs
+  const kg = DB.user.useLbs ? inputVal * LBS_TO_KG : inputVal;
   DB.bodyweight.push({ date: new Date().toISOString(), kg });
   DB.bodyweight.sort((a,b) => new Date(a.date) - new Date(b.date));
   saveDB();
@@ -159,6 +164,11 @@ $("#btnLogBW").addEventListener("click", () => {
   renderBodyweightEntries();
   $("#bwInput").value = "";
 });
+
+function updateBodyweightUnitLabel() {
+  const label = $("#bwUnitLabel");
+  if (label) label.textContent = getWeightUnit();
+}
 
 function renderBodyweightEntries() {
   const container = $("#bwEntries");
@@ -173,16 +183,18 @@ function renderBodyweightEntries() {
     return;
   }
 
+  const unit = getWeightUnit();
   recent.forEach((entry, idx) => {
     const actualIdx = DB.bodyweight.length - 1 - idx;
     const date = new Date(entry.date);
     const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+    const displayWeight = convertWeight(entry.kg);
 
     const div = document.createElement("div");
     div.className = "bw-entry";
     div.innerHTML = `
       <span>${dateStr}</span>
-      <span>${entry.kg} kg</span>
+      <span>${displayWeight} ${unit}</span>
       <button class="btn-ghost small text-red" onclick="deleteBodyweightEntry(${actualIdx})">✕</button>
     `;
     container.appendChild(div);
@@ -198,14 +210,18 @@ function deleteBodyweightEntry(index) {
 }
 
 function drawBodyweightChart() {
-  const ctx = $("#bwChart").getContext("2d");
+  const canvas = $("#bwChart");
   const data = DB.bodyweight.slice(-14); // Last 14 entries
 
-  // Reset canvas
-  ctx.canvas.width = ctx.canvas.offsetWidth;
-  ctx.canvas.height = ctx.canvas.offsetHeight;
-  const w = ctx.canvas.width;
-  const h = ctx.canvas.height;
+  // High-DPI canvas setup
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  const w = rect.width;
+  const h = rect.height;
 
   const isDark = document.body.classList.contains("theme-dark");
   const textColor = isDark ? "#fff" : "#000";
@@ -219,19 +235,20 @@ function drawBodyweightChart() {
     return;
   }
 
-  const padding = { top: 20, right: 20, bottom: 40, left: 45 };
+  const padding = { top: 20, right: 20, bottom: 40, left: 50 };
   const chartW = w - padding.left - padding.right;
   const chartH = h - padding.top - padding.bottom;
 
-  const values = data.map(d => d.kg);
+  // Convert values to display unit
+  const values = data.map(d => convertWeight(d.kg));
   const dataMin = Math.min(...values);
   const dataMax = Math.max(...values);
 
-  // Round to nice 5kg intervals
-  const minVal = Math.floor(dataMin / 5) * 5 - 5;
-  const maxVal = Math.ceil(dataMax / 5) * 5 + 5;
+  // Round to nice intervals (5 for kg, 10 for lbs)
+  const stepSize = DB.user.useLbs ? 10 : 5;
+  const minVal = Math.floor(dataMin / stepSize) * stepSize - stepSize;
+  const maxVal = Math.ceil(dataMax / stepSize) * stepSize + stepSize;
   const range = maxVal - minVal;
-  const stepSize = 5;
   const numSteps = Math.ceil(range / stepSize);
 
   ctx.clearRect(0, 0, w, h);
@@ -247,6 +264,7 @@ function drawBodyweightChart() {
     ctx.fillText(val.toFixed(0), padding.left - 8, y + 4);
     // Grid line
     ctx.strokeStyle = isDark ? "#333" : "#ddd";
+    ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(padding.left, y);
     ctx.lineTo(w - padding.right, y);
@@ -269,9 +287,9 @@ function drawBodyweightChart() {
   ctx.beginPath();
   ctx.strokeStyle = "#FF3333";
   ctx.lineWidth = 3;
-  data.forEach((d, i) => {
-    const x = padding.left + (i / (data.length - 1)) * chartW;
-    const y = padding.top + chartH - ((d.kg - minVal) / range) * chartH;
+  values.forEach((val, i) => {
+    const x = padding.left + (i / (values.length - 1)) * chartW;
+    const y = padding.top + chartH - ((val - minVal) / range) * chartH;
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
@@ -279,9 +297,9 @@ function drawBodyweightChart() {
 
   // Draw dots
   ctx.fillStyle = "#FF3333";
-  data.forEach((d, i) => {
-    const x = padding.left + (i / (data.length - 1)) * chartW;
-    const y = padding.top + chartH - ((d.kg - minVal) / range) * chartH;
+  values.forEach((val, i) => {
+    const x = padding.left + (i / (values.length - 1)) * chartW;
+    const y = padding.top + chartH - ((val - minVal) / range) * chartH;
     ctx.beginPath();
     ctx.arc(x, y, 5, 0, Math.PI * 2);
     ctx.fill();
@@ -396,9 +414,12 @@ function showDayDetails(iso, workouts) {
       const category = ex.type === 'cardio' ? 'Cardio' : (ex.muscle || 'Other');
       const color = MUSCLE_COLORS[category] || '#999';
 
-      const unit = DB.user.unit || 'kg';
+      const unit = getWeightUnit();
       const setsHtml = sets.map(s => {
-        if (s.w) return `<span class="set-tag">${s.w}${unit} × ${s.r}</span>`;
+        if (s.w) {
+          const displayW = convertWeight(parseFloat(s.w));
+          return `<span class="set-tag">${displayW}${unit} × ${s.r}</span>`;
+        }
         if (s.time) return `<span class="set-tag">${s.time}m / ${s.dist}${ex.cardioMetric || 'km'}</span>`;
         return "";
       }).join("");
@@ -509,9 +530,12 @@ function renderExerciseLibrary() {
     if (lastSession) {
       const date = new Date(lastSession.date);
       const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-      const unit = DB.user.unit || 'kg';
+      const unit = getWeightUnit();
       const sets = lastSession.sets.map(s => {
-        if (s.w) return `${s.w}${unit} × ${s.r}`;
+        if (s.w) {
+          const displayW = convertWeight(parseFloat(s.w));
+          return `${displayW}${unit} × ${s.r}`;
+        }
         if (s.time) return `${s.time}m / ${s.dist}${ex.cardioMetric || 'km'}`;
         return '';
       }).filter(Boolean).join(', ');
@@ -1045,9 +1069,11 @@ function openLogger(exId) {
       }, { w: 0, r: 0 });
 
       const increment = ex.increment || 2.5;
-      const lowerWeight = bestSet.w;
-      const higherWeight = bestSet.w + increment;
-      const unit = DB.user.unit || "kg";
+      const unit = getWeightUnit();
+      // Convert weights to display units
+      const displayBestW = convertWeight(bestSet.w);
+      const displayLowerW = displayBestW;
+      const displayHigherW = convertWeight(bestSet.w + increment);
 
       // Adjust rep targets based on training goal
       const goal = DB.user.trainingGoal || "hypertrophy";
@@ -1057,17 +1083,17 @@ function openLogger(exId) {
       let suggestion = "";
       if (DB.user.showSuggestions !== false) {
         if (bestSet.r >= targetReps.high) {
-          suggestion = `<strong>Try: ${higherWeight}${unit} for ${targetReps.low}-${targetReps.mid} reps</strong> (time to increase!)`;
+          suggestion = `<strong>Try: ${displayHigherW}${unit} for ${targetReps.low}-${targetReps.mid} reps</strong> (time to increase!)`;
         } else if (bestSet.r >= targetReps.mid) {
-          suggestion = `<strong>Try: ${lowerWeight}-${higherWeight}${unit} for ${bestSet.r}-${bestSet.r + 2} reps</strong>`;
+          suggestion = `<strong>Try: ${displayLowerW}-${displayHigherW}${unit} for ${bestSet.r}-${bestSet.r + 2} reps</strong>`;
         } else {
-          suggestion = `<strong>Try: ${lowerWeight}${unit} for ${bestSet.r + 1}-${bestSet.r + 3} reps</strong> (build reps first)`;
+          suggestion = `<strong>Try: ${displayLowerW}${unit} for ${bestSet.r + 1}-${bestSet.r + 3} reps</strong> (build reps first)`;
         }
       }
 
       const dateStr = new Date(lastSession.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
       $("#prevSessionInfo").innerHTML = `
-        <div class="muted small">Last: ${dateStr} — Best set: ${bestSet.w}${unit} × ${bestSet.r}</div>
+        <div class="muted small">Last: ${dateStr} — Best set: ${displayBestW}${unit} × ${bestSet.r}</div>
         ${DB.user.showSuggestions !== false ? `<div class="suggestion">${suggestion}</div>` : ''}
       `;
 
@@ -1476,14 +1502,16 @@ function renderHistory() {
          if(!sets || sets.length === 0) return;
          const ex = DB.exercises[exId];
          const exName = ex?.name || "Unknown";
-         const unit = DB.user.unit || 'kg';
+         const unit = getWeightUnit();
          let badges = sets.map(s => {
              if(s.w) {
+               const displayW = convertWeight(parseFloat(s.w));
                if (ex?.isAssisted && bw) {
-                 const effective = bw - parseFloat(s.w);
-                 return `<span class="set-tag">${effective}${unit} eff × ${s.r}</span>`;
+                 const effectiveBw = convertWeight(bw);
+                 const effective = effectiveBw - displayW;
+                 return `<span class="set-tag">${effective.toFixed(1)}${unit} eff × ${s.r}</span>`;
                }
-               return `<span class="set-tag">${s.w}${unit} × ${s.r}</span>`;
+               return `<span class="set-tag">${displayW}${unit} × ${s.r}</span>`;
              }
              if(s.time) {
                const metric = ex?.cardioMetric || 'km';
@@ -1565,6 +1593,9 @@ function simpleLineChart(ctx, labels, dataPoints, color) {
 }
 
 function renderStats() {
+    // Update unit label
+    updateBodyweightUnitLabel();
+
     // Draw bodyweight chart and entries
     drawBodyweightChart();
     renderBodyweightEntries();
@@ -1592,13 +1623,17 @@ function renderStats() {
 function updateStatsChart() {
     const exId = $("#statExSelect").value;
     const chartType = $("#statChartType").value; // "volume" or "maxWeight"
-    const ctx = $("#progChart").getContext("2d");
+    const canvas = $("#progChart");
 
-    // Reset canvas
-    ctx.canvas.width = ctx.canvas.offsetWidth;
-    ctx.canvas.height = ctx.canvas.offsetHeight;
-    const w = ctx.canvas.width;
-    const h = ctx.canvas.height;
+    // High-DPI canvas setup
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    const w = rect.width;
+    const h = rect.height;
 
     const isDark = document.body.classList.contains("theme-dark");
     const textColor = isDark ? "#fff" : "#000";
@@ -1616,8 +1651,9 @@ function updateStatsChart() {
     }
 
     const ex = DB.exercises[exId];
+    const unit = getWeightUnit();
 
-    // Extract history - calculate total volume and max weight
+    // Extract history - calculate total volume and max weight with unit conversion
     const historyForDisplay = [];
     DB.sessions.forEach(s => {
         if(s.entries && s.entries[exId] && s.entries[exId].length > 0) {
@@ -1625,7 +1661,7 @@ function updateStatsChart() {
             let maxWeight = 0;
             const sets = s.entries[exId];
             sets.forEach(set => {
-                const weight = parseFloat(set.w || 0);
+                const weight = convertWeight(parseFloat(set.w || 0));
                 const reps = parseInt(set.r || 0);
                 totalVolume += weight * reps;
                 if (weight > maxWeight) maxWeight = weight;
@@ -1642,12 +1678,14 @@ function updateStatsChart() {
             historyContainer.innerHTML = '<p class="muted">No history for this exercise yet.</p>';
         } else {
             let html = '<h3 class="mb-2">LIFT HISTORY</h3>';
-            const unit = DB.user.unit || 'kg';
             historyForDisplay.slice(0, 3).forEach(h => {
                 const date = new Date(h.date);
                 const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
                 const setsHtml = h.sets.map(s => {
-                    if (s.w) return `<span class="set-tag">${s.w}${unit} × ${s.r}</span>`;
+                    if (s.w) {
+                        const displayW = convertWeight(parseFloat(s.w));
+                        return `<span class="set-tag">${displayW}${unit} × ${s.r}</span>`;
+                    }
                     if (s.time) return `<span class="set-tag">${s.time}m / ${s.dist}${ex?.cardioMetric || 'km'}</span>`;
                     return '';
                 }).join('');
@@ -1679,28 +1717,24 @@ function updateStatsChart() {
     const dataMin = Math.min(...chartData);
     const dataMax = Math.max(...chartData);
 
-    // Round to nice intervals
-    const range = dataMax - dataMin || 1;
-    const magnitude = Math.pow(10, Math.floor(Math.log10(range)));
-    const stepSize = magnitude > 100 ? Math.ceil(range / 4 / magnitude) * magnitude : Math.ceil(range / 4 / 50) * 50 || 100;
-
-    const minVal = Math.floor(dataMin / stepSize) * stepSize;
-    const maxVal = Math.ceil(dataMax / stepSize) * stepSize + stepSize;
-    const finalRange = maxVal - minVal;
+    // Round to nearest 100 for clean Y-axis
+    const roundedMax = Math.ceil(dataMax / 100) * 100 || 100;
+    const roundedMin = Math.max(0, Math.floor(dataMin / 100) * 100 - 100);
+    const finalRange = roundedMax - roundedMin;
 
     ctx.clearRect(0, 0, w, h);
 
-    // Y axis labels (volume)
-    ctx.font = "10px -apple-system, sans-serif";
+    // Y axis labels - round to 100s
+    ctx.font = "11px -apple-system, sans-serif";
     ctx.fillStyle = textColor;
     ctx.textAlign = "right";
-    const numSteps = Math.min(5, Math.ceil(finalRange / stepSize));
+    const numSteps = 5;
     for (let i = 0; i <= numSteps; i++) {
-        const val = minVal + (i * stepSize);
-        if (val > maxVal) break;
-        const y = padding.top + chartH - ((val - minVal) / finalRange) * chartH;
-        ctx.fillText(val.toLocaleString(), padding.left - 8, y + 4);
+        const val = roundedMin + (i / numSteps) * finalRange;
+        const y = padding.top + chartH - (i / numSteps) * chartH;
+        ctx.fillText(Math.round(val).toLocaleString(), padding.left - 8, y + 4);
         ctx.strokeStyle = isDark ? "#333" : "#ddd";
+        ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(padding.left, y);
         ctx.lineTo(w - padding.right, y);
@@ -1715,7 +1749,7 @@ function updateStatsChart() {
             const x = padding.left + (i / (history.length - 1)) * chartW;
             const date = new Date(h.date);
             const label = `${date.getDate()}/${date.getMonth() + 1}`;
-            ctx.fillText(label, x, ctx.canvas.height - padding.bottom + 20);
+            ctx.fillText(label, x, h - padding.bottom + 20);
         }
     });
 
@@ -1726,7 +1760,7 @@ function updateStatsChart() {
     ctx.lineWidth = 3;
     chartData.forEach((val, i) => {
         const x = padding.left + (i / (chartData.length - 1)) * chartW;
-        const y = padding.top + chartH - ((val - minVal) / finalRange) * chartH;
+        const y = padding.top + chartH - ((val - roundedMin) / finalRange) * chartH;
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
     });
@@ -1736,7 +1770,7 @@ function updateStatsChart() {
     ctx.fillStyle = ctx.strokeStyle;
     chartData.forEach((val, i) => {
         const x = padding.left + (i / (chartData.length - 1)) * chartW;
-        const y = padding.top + chartH - ((val - minVal) / finalRange) * chartH;
+        const y = padding.top + chartH - ((val - roundedMin) / finalRange) * chartH;
         ctx.beginPath();
         ctx.arc(x, y, 5, 0, Math.PI * 2);
         ctx.fill();
@@ -2037,31 +2071,43 @@ $("#dataHeader").addEventListener("click", () => {
 
 // --- SETTINGS ---
 function loadSettings() {
-  // Set unit selector
-  const unitSelect = $("#settingUnit");
-  if (unitSelect) unitSelect.value = DB.user.unit || "kg";
+  // Set unit toggle
+  const unitToggle = $("#settingUnit");
+  if (unitToggle) unitToggle.checked = DB.user.useLbs || false;
 
   // Set suggestions toggle
   const suggestionsToggle = $("#settingSuggestions");
   if (suggestionsToggle) suggestionsToggle.checked = DB.user.showSuggestions !== false;
+
+  // Set compound toggle
+  const compoundToggle = $("#settingCompound");
+  if (compoundToggle) compoundToggle.checked = DB.user.includeCompound !== false;
 
   // Set training goal
   const goalSelect = $("#settingGoal");
   if (goalSelect) goalSelect.value = DB.user.trainingGoal || "hypertrophy";
 }
 
-// Unit setting change
+// Unit setting change (toggle)
 $("#settingUnit").addEventListener("change", (e) => {
-  DB.user.unit = e.target.value;
+  DB.user.useLbs = e.target.checked;
   saveDB();
-  // Re-render current tab to apply unit changes
-  renderCurrentTab($(".tab.active").dataset.tab);
+  // Update all charts and labels
+  updateBodyweightUnitLabel();
+  renderStats();
 });
 
 // Suggestions toggle
 $("#settingSuggestions").addEventListener("change", (e) => {
   DB.user.showSuggestions = e.target.checked;
   saveDB();
+});
+
+// Compound muscles toggle
+$("#settingCompound").addEventListener("change", (e) => {
+  DB.user.includeCompound = e.target.checked;
+  saveDB();
+  renderBreakdownChart();
 });
 
 // Training goal change
@@ -2071,25 +2117,33 @@ $("#settingGoal").addEventListener("change", (e) => {
 });
 
 // --- UNIT CONVERSION HELPERS ---
+function convertWeight(kg) {
+  // Convert kg value to display unit
+  if (DB.user.useLbs) {
+    return parseFloat((kg * KG_TO_LBS).toFixed(1));
+  }
+  return parseFloat(kg);
+}
+
 function formatWeight(kg) {
-  if (DB.user.unit === "lbs") {
+  // Format kg value with unit label
+  if (DB.user.useLbs) {
     return (kg * KG_TO_LBS).toFixed(1) + " lbs";
   }
   return kg + " kg";
 }
 
-function parseWeight(value) {
-  // Parse input and convert to kg for storage
-  const num = parseFloat(value);
-  if (isNaN(num)) return 0;
-  if (DB.user.unit === "lbs") {
-    return num * LBS_TO_KG;
-  }
-  return num;
+function formatWeightValue(value) {
+  // Format a value that's already in display units
+  return value + (DB.user.useLbs ? " lbs" : " kg");
 }
 
 function getWeightLabel() {
-  return DB.user.unit === "lbs" ? "LBS" : "KG";
+  return DB.user.useLbs ? "LBS" : "KG";
+}
+
+function getWeightUnit() {
+  return DB.user.useLbs ? "lbs" : "kg";
 }
 
 // --- FACTORY RESET ---
@@ -2188,51 +2242,87 @@ $("#newExMuscle").addEventListener("change", () => {
 });
 
 // --- BREAKDOWN CHART ---
-let breakdownChart = null;
+let _breakdownOffset = 0; // 0 = current period, -1 = previous, etc.
+let _hiddenMuscles = new Set(); // Muscles hidden from chart
 
-function renderBreakdownChart() {
-  const canvas = $("#breakdownChart");
-  if (!canvas) return;
-
-  const ctx = canvas.getContext("2d");
+function getBreakdownPeriodInfo() {
   const period = $("#breakdownPeriod").value;
-  const mode = $("#breakdownMode").value;
-
-  // Reset canvas
-  ctx.canvas.width = ctx.canvas.offsetWidth;
-  ctx.canvas.height = ctx.canvas.offsetHeight;
-  const w = ctx.canvas.width;
-  const h = ctx.canvas.height;
-
-  const isDark = document.body.classList.contains("theme-dark");
-  const textColor = isDark ? "#fff" : "#000";
-
-  // Filter sessions by period
   const now = new Date();
-  let startDate;
-  let labels = [];
+  let startDate, endDate, labels = [], labelText;
 
   if (period === "week") {
-    startDate = new Date(now);
-    startDate.setDate(now.getDate() - 6);
+    // Start of week (Sunday) offset by _breakdownOffset weeks
+    const currentWeekStart = new Date(now);
+    currentWeekStart.setDate(now.getDate() - now.getDay() + (_breakdownOffset * 7));
+    startDate = new Date(currentWeekStart);
+    endDate = new Date(startDate);
+    endDate.setDate(startDate.getDate() + 6);
+
     for (let i = 0; i < 7; i++) {
       const d = new Date(startDate);
       d.setDate(startDate.getDate() + i);
       labels.push(DAYS[d.getDay()]);
     }
+
+    if (_breakdownOffset === 0) {
+      labelText = "This Week";
+    } else {
+      const weekStart = startDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      const weekEnd = endDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      labelText = `${weekStart} - ${weekEnd}`;
+    }
+
   } else if (period === "month") {
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const targetMonth = new Date(now.getFullYear(), now.getMonth() + _breakdownOffset, 1);
+    startDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth(), 1);
+    endDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth() + 1, 0);
+    const daysInMonth = endDate.getDate();
+
     for (let i = 1; i <= daysInMonth; i++) {
       labels.push(i.toString());
     }
+
+    const monthNames = ["January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"];
+    labelText = `${monthNames[targetMonth.getMonth()]} ${targetMonth.getFullYear()}`;
+
   } else { // year
-    startDate = new Date(now.getFullYear(), 0, 1);
+    const targetYear = now.getFullYear() + _breakdownOffset;
+    startDate = new Date(targetYear, 0, 1);
+    endDate = new Date(targetYear, 11, 31);
     labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    labelText = targetYear.toString();
   }
 
+  return { startDate, endDate, labels, labelText, period };
+}
+
+function renderBreakdownChart() {
+  const canvas = $("#breakdownChart");
+  if (!canvas) return;
+
+  const { startDate, endDate, labels, labelText, period } = getBreakdownPeriodInfo();
+  $("#breakdownPeriodLabel").textContent = labelText;
+
+  const mode = $("#breakdownMode").value;
+  const isDark = document.body.classList.contains("theme-dark");
+  const textColor = isDark ? "#fff" : "#000";
+
+  // Set up high-DPI canvas
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  const w = rect.width;
+  const h = rect.height;
+
   // Get relevant sessions
-  const sessions = DB.sessions.filter(s => new Date(s.start) >= startDate);
+  const sessions = DB.sessions.filter(s => {
+    const d = new Date(s.start);
+    return d >= startDate && d <= endDate;
+  });
 
   if (sessions.length === 0) {
     ctx.clearRect(0, 0, w, h);
@@ -2241,6 +2331,7 @@ function renderBreakdownChart() {
     ctx.textAlign = "center";
     ctx.fillText("No workouts in this period", w / 2, h / 2);
     $("#breakdownLegend").innerHTML = "";
+    $("#breakdownCardio").innerHTML = "";
     return;
   }
 
@@ -2252,116 +2343,157 @@ function renderBreakdownChart() {
 
     sessions.forEach(s => {
       const sessionDate = new Date(s.start);
-      let idx;
+      let idx = getBreakdownIndex(sessionDate, startDate, period, labels.length);
 
-      if (period === "week") {
-        const diff = Math.floor((sessionDate - startDate) / (1000 * 60 * 60 * 24));
-        idx = Math.max(0, Math.min(6, diff));
-      } else if (period === "month") {
-        idx = sessionDate.getDate() - 1;
-      } else {
-        idx = sessionDate.getMonth();
-      }
-
-      // Calculate total volume for session
+      // Calculate total volume for session (strength only)
       Object.entries(s.entries || {}).forEach(([exId, sets]) => {
+        const ex = DB.exercises[exId];
+        if (!ex || ex.type === "cardio") return;
+
         sets.forEach(set => {
           const weight = parseFloat(set.w || 0);
           const reps = parseInt(set.r || 0);
-          volumeByPeriod[idx] += weight * reps;
+          // Convert weight to display unit for chart
+          volumeByPeriod[idx] += convertWeight(weight) * reps;
         });
       });
     });
 
-    drawBarChart(ctx, labels, Object.values(volumeByPeriod), "#FF3333", textColor, isDark);
-    $("#breakdownLegend").innerHTML = '<span class="legend-item"><span class="legend-color" style="background:#FF3333"></span>Total Volume (kg × reps)</span>';
+    const unit = getWeightUnit();
+    drawHiResBarChart(ctx, w, h, labels, Object.values(volumeByPeriod), "#FF3333", textColor, isDark);
+    $("#breakdownLegend").innerHTML = `<span class="legend-tab active" style="border-color:#FF3333;background:#FF3333;color:#000">Total Volume (${unit} × reps)</span>`;
+    $("#breakdownCardio").innerHTML = "";
 
   } else {
     // Stacked bar chart by muscle group
     const muscleData = {};
-    MUSCLE_GROUPS.concat(["Cardio"]).forEach(m => {
+    let cardioSessions = 0;
+
+    MUSCLE_GROUPS.forEach(m => {
       muscleData[m] = {};
       labels.forEach((_, i) => muscleData[m][i] = 0);
     });
 
     sessions.forEach(s => {
       const sessionDate = new Date(s.start);
-      let idx;
-
-      if (period === "week") {
-        const diff = Math.floor((sessionDate - startDate) / (1000 * 60 * 60 * 24));
-        idx = Math.max(0, Math.min(6, diff));
-      } else if (period === "month") {
-        idx = sessionDate.getDate() - 1;
-      } else {
-        idx = sessionDate.getMonth();
-      }
+      let idx = getBreakdownIndex(sessionDate, startDate, period, labels.length);
+      let hasCardio = false;
 
       Object.entries(s.entries || {}).forEach(([exId, sets]) => {
         const ex = DB.exercises[exId];
         if (!ex) return;
 
-        const muscle = ex.type === "cardio" ? "Cardio" : (ex.muscle || "Other");
+        if (ex.type === "cardio") {
+          hasCardio = true;
+          return; // Skip cardio for volume chart
+        }
+
+        const muscle = ex.muscle || "Other";
         let volume = 0;
 
         sets.forEach(set => {
           if (set.w && set.r) {
-            volume += parseFloat(set.w) * parseInt(set.r);
-          } else if (set.time) {
-            volume += parseFloat(set.time) * 10; // Weight cardio by time
+            volume += convertWeight(parseFloat(set.w)) * parseInt(set.r);
           }
         });
 
-        muscleData[muscle][idx] += volume;
+        if (!_hiddenMuscles.has(muscle)) {
+          muscleData[muscle][idx] += volume;
+        }
 
-        // Also add to secondary muscles if compound
-        if (ex.isCompound && ex.secondaryMuscles) {
+        // Also add to secondary muscles if compound and setting enabled
+        if (DB.user.includeCompound && ex.isCompound && ex.secondaryMuscles) {
           ex.secondaryMuscles.forEach(secMuscle => {
-            muscleData[secMuscle][idx] += volume * 0.5; // Secondary gets 50% credit
+            if (!_hiddenMuscles.has(secMuscle)) {
+              muscleData[secMuscle][idx] += volume * 0.5;
+            }
           });
         }
       });
+
+      if (hasCardio) cardioSessions++;
     });
 
-    drawStackedBarChart(ctx, labels, muscleData, textColor, isDark);
+    drawHiResStackedBarChart(ctx, w, h, labels, muscleData, textColor, isDark);
 
-    // Render legend
-    const legendHtml = Object.entries(MUSCLE_COLORS)
-      .filter(([muscle]) => {
-        // Only show muscles that have data
-        return Object.values(muscleData[muscle] || {}).some(v => v > 0);
-      })
-      .map(([muscle, color]) =>
-        `<span class="legend-item"><span class="legend-color" style="background:${color}"></span>${muscle}</span>`
-      ).join("");
-    $("#breakdownLegend").innerHTML = legendHtml;
+    // Render clickable legend styled like tabs
+    const legendContainer = $("#breakdownLegend");
+    legendContainer.innerHTML = "";
+
+    MUSCLE_GROUPS.forEach(muscle => {
+      // Check if muscle has any data
+      const hasData = Object.values(muscleData[muscle] || {}).some(v => v > 0) || _hiddenMuscles.has(muscle);
+      if (!hasData && !_hiddenMuscles.has(muscle)) return;
+
+      const color = MUSCLE_COLORS[muscle] || "#999";
+      const isHidden = _hiddenMuscles.has(muscle);
+
+      const tab = document.createElement("button");
+      tab.className = `legend-tab ${isHidden ? "inactive" : "active"}`;
+      tab.textContent = muscle;
+      tab.style.borderColor = color;
+      if (!isHidden) {
+        tab.style.background = color;
+        tab.style.color = "#000";
+      }
+      tab.onclick = () => {
+        if (_hiddenMuscles.has(muscle)) {
+          _hiddenMuscles.delete(muscle);
+        } else {
+          _hiddenMuscles.add(muscle);
+        }
+        renderBreakdownChart();
+      };
+      legendContainer.appendChild(tab);
+    });
+
+    // Show cardio session count
+    if (cardioSessions > 0) {
+      const cardioWord = cardioSessions === 1 ? "session" : "sessions";
+      $("#breakdownCardio").innerHTML = `<span style="color:${MUSCLE_COLORS.Cardio}">●</span> ${cardioSessions} cardio ${cardioWord}`;
+    } else {
+      $("#breakdownCardio").innerHTML = "";
+    }
   }
 }
 
-function drawBarChart(ctx, labels, values, color, textColor, isDark) {
-  const w = ctx.canvas.width;
-  const h = ctx.canvas.height;
+function getBreakdownIndex(date, startDate, period, maxLabels) {
+  if (period === "week") {
+    const diff = Math.floor((date - startDate) / (1000 * 60 * 60 * 24));
+    return Math.max(0, Math.min(6, diff));
+  } else if (period === "month") {
+    return Math.min(date.getDate() - 1, maxLabels - 1);
+  } else {
+    return date.getMonth();
+  }
+}
+
+function drawHiResBarChart(ctx, w, h, labels, values, color, textColor, isDark) {
   const padding = { top: 20, right: 20, bottom: 40, left: 55 };
   const chartW = w - padding.left - padding.right;
   const chartH = h - padding.top - padding.bottom;
 
   ctx.clearRect(0, 0, w, h);
 
-  const maxVal = Math.max(...values) || 1;
+  const maxVal = Math.max(...values) || 100;
+  // Round max to nearest 100
+  const roundedMax = Math.ceil(maxVal / 100) * 100 || 100;
+
   const barWidth = chartW / labels.length * 0.7;
   const gap = chartW / labels.length * 0.15;
 
-  // Y axis
-  ctx.font = "10px -apple-system, sans-serif";
+  // Y axis with rounded values
+  ctx.font = "11px -apple-system, sans-serif";
   ctx.fillStyle = textColor;
   ctx.textAlign = "right";
 
   const steps = 5;
   for (let i = 0; i <= steps; i++) {
-    const val = (maxVal / steps) * i;
+    const val = (roundedMax / steps) * i;
     const y = padding.top + chartH - (i / steps) * chartH;
     ctx.fillText(Math.round(val).toLocaleString(), padding.left - 8, y + 4);
     ctx.strokeStyle = isDark ? "#333" : "#ddd";
+    ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(padding.left, y);
     ctx.lineTo(w - padding.right, y);
@@ -2372,7 +2504,7 @@ function drawBarChart(ctx, labels, values, color, textColor, isDark) {
   ctx.fillStyle = color;
   values.forEach((val, i) => {
     const x = padding.left + gap + i * (chartW / labels.length);
-    const barH = (val / maxVal) * chartH;
+    const barH = (val / roundedMax) * chartH;
     const y = padding.top + chartH - barH;
     ctx.fillRect(x, y, barWidth, barH);
   });
@@ -2389,35 +2521,39 @@ function drawBarChart(ctx, labels, values, color, textColor, isDark) {
   });
 }
 
-function drawStackedBarChart(ctx, labels, muscleData, textColor, isDark) {
-  const w = ctx.canvas.width;
-  const h = ctx.canvas.height;
+function drawHiResStackedBarChart(ctx, w, h, labels, muscleData, textColor, isDark) {
   const padding = { top: 20, right: 20, bottom: 40, left: 55 };
   const chartW = w - padding.left - padding.right;
   const chartH = h - padding.top - padding.bottom;
 
   ctx.clearRect(0, 0, w, h);
 
-  // Calculate max stacked value
+  // Calculate max stacked value (excluding hidden muscles)
   const totals = labels.map((_, i) => {
-    return Object.values(muscleData).reduce((sum, muscle) => sum + (muscle[i] || 0), 0);
+    return MUSCLE_GROUPS.reduce((sum, muscle) => {
+      if (_hiddenMuscles.has(muscle)) return sum;
+      return sum + (muscleData[muscle]?.[i] || 0);
+    }, 0);
   });
-  const maxVal = Math.max(...totals) || 1;
+  const maxVal = Math.max(...totals) || 100;
+  // Round max to nearest 100
+  const roundedMax = Math.ceil(maxVal / 100) * 100 || 100;
 
   const barWidth = chartW / labels.length * 0.7;
   const gap = chartW / labels.length * 0.15;
 
   // Y axis
-  ctx.font = "10px -apple-system, sans-serif";
+  ctx.font = "11px -apple-system, sans-serif";
   ctx.fillStyle = textColor;
   ctx.textAlign = "right";
 
   const steps = 5;
   for (let i = 0; i <= steps; i++) {
-    const val = (maxVal / steps) * i;
+    const val = (roundedMax / steps) * i;
     const y = padding.top + chartH - (i / steps) * chartH;
     ctx.fillText(Math.round(val).toLocaleString(), padding.left - 8, y + 4);
     ctx.strokeStyle = isDark ? "#333" : "#ddd";
+    ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(padding.left, y);
     ctx.lineTo(w - padding.right, y);
@@ -2429,11 +2565,13 @@ function drawStackedBarChart(ctx, labels, muscleData, textColor, isDark) {
     const x = padding.left + gap + i * (chartW / labels.length);
     let currentY = padding.top + chartH;
 
-    Object.entries(MUSCLE_COLORS).forEach(([muscle, color]) => {
+    MUSCLE_GROUPS.forEach(muscle => {
+      if (_hiddenMuscles.has(muscle)) return;
       const val = muscleData[muscle]?.[i] || 0;
       if (val === 0) return;
 
-      const barH = (val / maxVal) * chartH;
+      const color = MUSCLE_COLORS[muscle] || "#999";
+      const barH = (val / roundedMax) * chartH;
       ctx.fillStyle = color;
       ctx.fillRect(x, currentY - barH, barWidth, barH);
       currentY -= barH;
@@ -2453,8 +2591,21 @@ function drawStackedBarChart(ctx, labels, muscleData, textColor, isDark) {
 }
 
 // Breakdown chart controls
-$("#breakdownPeriod").addEventListener("change", renderBreakdownChart);
+$("#breakdownPeriod").addEventListener("change", () => {
+  _breakdownOffset = 0; // Reset to current period when changing type
+  renderBreakdownChart();
+});
 $("#breakdownMode").addEventListener("change", renderBreakdownChart);
+
+// Period navigation
+$("#btnPrevBreakdown").addEventListener("click", () => {
+  _breakdownOffset--;
+  renderBreakdownChart();
+});
+$("#btnNextBreakdown").addEventListener("click", () => {
+  _breakdownOffset++;
+  renderBreakdownChart();
+});
 
 // Initialization
 migrateExerciseCategories();
