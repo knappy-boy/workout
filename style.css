@@ -235,9 +235,11 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 
 /* EXERCISE HISTORY IN STATS */
 .exercise-history { max-height: 300px; overflow-y: auto; }
-.ex-history-item { padding: 8px 0; border-bottom: 1px solid #eee; }
+.ex-history-item { padding: 8px 0; border-bottom: 1px solid #eee; display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; }
 .ex-history-item:last-child { border-bottom: none; }
 .theme-dark .ex-history-item { border-color: #333; }
+.ex-history-date { white-space: nowrap; }
+.ex-history-sets { display: flex; flex-wrap: wrap; gap: 4px; }
 
 /* CHARTS */
 .chart-container { position: relative; width: 100%; height: 200px; }
@@ -285,6 +287,8 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .theme-dark .suggestion { background: #1b3d1f; }
 
 /* TIMER STYLES */
+.timer-card { cursor: pointer; }
+.timer-card:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0px 0px var(--black); }
 .timer-display {
   flex: 1;
   text-align: center;
@@ -292,8 +296,9 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .timer-display h2 {
   margin: 0;
 }
-.timer-toggle { font-size: 1rem; padding: 5px 10px; display: flex; align-items: center; }
-.timer-toggle svg { stroke: currentColor; }
+.timer-toggle { font-size: 1rem; padding: 5px 10px; display: flex; align-items: center; color: #fff; }
+.timer-toggle svg { stroke: currentColor; transition: opacity 0.2s; }
+.timer-toggle.timer-hidden svg { opacity: 0.4; }
 .text-center { text-align: center; }
 
 /* Save template button */
@@ -331,10 +336,8 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 /* Unit toggle with labels */
 .unit-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .unit-toggle input { display: none; }
-.unit-label-kg, .unit-label-lbs { font-weight: 700; font-size: 0.85rem; transition: opacity 0.2s; }
-.unit-label-kg { opacity: 1; }
-.unit-label-lbs { opacity: 0.4; }
-.unit-toggle input:checked ~ .unit-label-kg { opacity: 0.4; }
+.unit-label-kg, .unit-label-lbs { font-weight: 700; font-size: 0.85rem; transition: opacity 0.2s; opacity: 0.4; }
+.unit-toggle input:not(:checked) ~ .unit-label-kg { opacity: 1; }
 .unit-toggle input:checked ~ .unit-label-lbs { opacity: 1; }
 .unit-toggle-track { position: relative; width: 40px; height: 22px; background: #ccc; border: 2px solid #000; transition: background 0.2s; }
 .unit-toggle-track:before { content: ""; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px; background: #000; transition: transform 0.2s; }

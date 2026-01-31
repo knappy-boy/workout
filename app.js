@@ -236,7 +236,7 @@ function drawBodyweightChart() {
     return;
   }
 
-  const padding = { top: 20, right: 20, bottom: 40, left: 50 };
+  const padding = { top: 20, right: 20, bottom: 40, left: 40 };
   const chartW = w - padding.left - padding.right;
   const chartH = h - padding.top - padding.bottom;
 
@@ -1694,7 +1694,7 @@ function updateStatsChart() {
                     if (s.time) return `<span class="set-tag">${s.time}m / ${s.dist}${ex?.cardioMetric || 'km'}</span>`;
                     return '';
                 }).join('');
-                html += `<div class="ex-history-item"><strong>${dateStr}</strong> ${setsHtml}</div>`;
+                html += `<div class="ex-history-item"><div class="ex-history-date"><strong>${dateStr}</strong></div><div class="ex-history-sets">${setsHtml}</div></div>`;
             });
 
             if (remaining > 0) {
@@ -1736,7 +1736,7 @@ function updateStatsChart() {
         return;
     }
 
-    const padding = { top: 20, right: 20, bottom: 40, left: 55 };
+    const padding = { top: 20, right: 20, bottom: 40, left: 40 };
     const chartW = w - padding.left - padding.right;
     const chartH = h - padding.top - padding.bottom;
 
@@ -2045,10 +2045,21 @@ $("#btnTheme").addEventListener("click", () => {
    }
 });
 
-// Timer Toggle - Show/hide time display (only on clock icon click)
-$("#btnToggleTimer").addEventListener("click", (e) => {
-  e.stopPropagation(); // Prevent event bubbling
-  $("#timerDisplay").classList.toggle("hidden");
+// Timer Toggle - Click anywhere on timer card to toggle display
+$("#timerCard").addEventListener("click", (e) => {
+  // Don't toggle if clicking the FINISH button
+  if (e.target.id === "btnFinishWorkout" || e.target.closest("#btnFinishWorkout")) return;
+
+  const timerDisplay = $("#timerDisplay");
+  const toggleIcon = $("#btnToggleTimer");
+  timerDisplay.classList.toggle("hidden");
+
+  // Update icon opacity to indicate hidden state
+  if (timerDisplay.classList.contains("hidden")) {
+    toggleIcon.classList.add("timer-hidden");
+  } else {
+    toggleIcon.classList.remove("timer-hidden");
+  }
 });
 
 // Templates section collapsible toggle
@@ -2084,10 +2095,10 @@ window.addEventListener("resize", () => {
 });
 
 // --- COLLAPSIBLE SECTIONS ---
-// Breakdown section toggle
-$("#breakdownHeader").addEventListener("click", () => {
-  const content = $("#breakdownContent");
-  const icon = $("#breakdownToggle");
+// Data section toggle in settings
+$("#dataHeader").addEventListener("click", () => {
+  const content = $("#dataContent");
+  const icon = $("#dataToggle");
   content.classList.toggle("collapsed");
   icon.classList.toggle("collapsed");
 });
@@ -2389,8 +2400,8 @@ function renderBreakdownChart() {
       if (!ex || !sets || sets.length === 0) return;
 
       if (ex.type === "cardio") {
-        // For cardio, count sets (each entry is a set)
-        if (!_hiddenMuscles.has("Cardio")) {
+        // Cardio only appears in "sets" mode, not "volume" mode
+        if (mode === "sets" && !_hiddenMuscles.has("Cardio")) {
           muscleData["Cardio"][idx] += sets.length;
         }
         return;
@@ -2523,7 +2534,7 @@ function getBreakdownIndex(date, startDate, period, maxLabels, granularity = "da
 }
 
 function drawHiResBarChart(ctx, w, h, labels, values, color, textColor, isDark) {
-  const padding = { top: 20, right: 20, bottom: 40, left: 55 };
+  const padding = { top: 20, right: 20, bottom: 40, left: 40 };
   const chartW = w - padding.left - padding.right;
   const chartH = h - padding.top - padding.bottom;
 
@@ -2576,7 +2587,7 @@ function drawHiResBarChart(ctx, w, h, labels, values, color, textColor, isDark) 
 }
 
 function drawHiResStackedBarChart(ctx, w, h, labels, muscleData, groups, textColor, isDark, roundTo = 100) {
-  const padding = { top: 20, right: 20, bottom: 40, left: 55 };
+  const padding = { top: 20, right: 20, bottom: 40, left: 40 };
   const chartW = w - padding.left - padding.right;
   const chartH = h - padding.top - padding.bottom;
 

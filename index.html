@@ -60,15 +60,15 @@
 
     <section id="tab-workout" class="panel">
       <div id="activeWorkoutPanel" class="hidden">
-        <!-- Timer card - always visible, time display toggles -->
-        <div class="neo-card bg-red text-white mb-4">
+        <!-- Timer card - click anywhere to toggle timer display -->
+        <div id="timerCard" class="neo-card bg-red text-white mb-4 timer-card">
           <div class="row">
-            <button id="btnToggleTimer" class="btn-ghost text-white timer-toggle">
+            <div id="btnToggleTimer" class="timer-toggle">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
                 <circle cx="12" cy="12" r="10"/>
                 <polyline points="12 6 12 12 16 14"/>
               </svg>
-            </button>
+            </div>
             <div id="timerDisplay" class="timer-display hidden">
               <h2 id="workoutTimer">00:00</h2>
             </div>
@@ -173,36 +173,32 @@
       </div>
 
       <div class="neo-card bg-white mt-4">
-        <div class="row collapsible-header" id="breakdownHeader">
-          <h2>WORKOUT BREAKDOWN <span id="breakdownToggle" class="toggle-icon collapsed">▼</span></h2>
+        <h2>WORKOUT BREAKDOWN</h2>
+        <div class="row gap-2 mb-2 mt-2">
+          <select id="breakdownPeriod" class="neo-select">
+            <option value="week">Week</option>
+            <option value="month">Month</option>
+            <option value="year">Year</option>
+          </select>
+          <select id="breakdownGranularity" class="neo-select hidden">
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+          </select>
+          <select id="breakdownMode" class="neo-select">
+            <option value="volume">Volume</option>
+            <option value="sets">Sets</option>
+          </select>
         </div>
-        <div id="breakdownContent" class="collapsible-content collapsed">
-          <div class="row gap-2 mb-2">
-            <select id="breakdownPeriod" class="neo-select">
-              <option value="week">Week</option>
-              <option value="month">Month</option>
-              <option value="year">Year</option>
-            </select>
-            <select id="breakdownGranularity" class="neo-select hidden">
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
-            </select>
-            <select id="breakdownMode" class="neo-select">
-              <option value="volume">Volume</option>
-              <option value="sets">Sets</option>
-            </select>
-          </div>
-          <div class="row mb-2">
-            <button id="btnPrevBreakdown" class="btn-ghost">◀</button>
-            <span id="breakdownPeriodLabel" class="breakdown-period-label">This Week</span>
-            <button id="btnNextBreakdown" class="btn-ghost">▶</button>
-          </div>
-          <div class="chart-container large">
-            <canvas id="breakdownChart"></canvas>
-          </div>
-          <div id="breakdownLegend" class="breakdown-legend mt-2"></div>
-          <div id="breakdownCardio" class="breakdown-cardio mt-2"></div>
+        <div class="row mb-2">
+          <button id="btnPrevBreakdown" class="btn-ghost">◀</button>
+          <span id="breakdownPeriodLabel" class="breakdown-period-label">This Week</span>
+          <button id="btnNextBreakdown" class="btn-ghost">▶</button>
         </div>
+        <div class="chart-container large">
+          <canvas id="breakdownChart"></canvas>
+        </div>
+        <div id="breakdownLegend" class="breakdown-legend mt-2"></div>
+        <div id="breakdownCardio" class="breakdown-cardio mt-2"></div>
       </div>
 
     </section>
@@ -246,13 +242,17 @@
       </div>
 
       <div class="neo-card bg-black text-white mt-4">
-        <h2>DATA</h2>
-        <button id="btnExportCSV" class="btn-white full mt-2">EXPORT CSV</button>
-        <button id="btnExportJSON" class="btn-white full mt-2">BACKUP (JSON)</button>
-        <label class="btn-white full mt-2 text-center block">
-           RESTORE (JSON) <input type="file" id="fileRestore" hidden>
-        </label>
-        <button id="btnFactoryReset" class="btn-white full mt-4" style="color: #ff3333;">FACTORY RESET</button>
+        <div class="row collapsible-header" id="dataHeader">
+          <h2>DATA <span id="dataToggle" class="toggle-icon collapsed">▼</span></h2>
+        </div>
+        <div id="dataContent" class="collapsible-content collapsed">
+          <button id="btnExportCSV" class="btn-white full mt-2">EXPORT CSV</button>
+          <button id="btnExportJSON" class="btn-white full mt-2">BACKUP (JSON)</button>
+          <label class="btn-white full mt-2 text-center block">
+             RESTORE (JSON) <input type="file" id="fileRestore" hidden>
+          </label>
+          <button id="btnFactoryReset" class="btn-white full mt-4" style="color: #ff3333;">FACTORY RESET</button>
+        </div>
       </div>
     </section>
 
