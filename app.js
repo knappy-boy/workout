@@ -682,10 +682,11 @@ function renderExerciseLibrary() {
 
     // Label shows "Cardio" for cardio type, muscle name for strength
     const labelText = ex.type === 'cardio' ? 'Cardio' : (ex.muscle || 'Other');
+    const muscleColor = MUSCLE_COLORS[category] || '#999';
 
     div.innerHTML = `
       <div class="ex-item-header">
-        <span class="ex-name">${ex.name} <span class="muscle-tag">${labelText}</span></span>
+        <span class="ex-name">${ex.name} <span class="muscle-tag" style="background: ${muscleColor}; color: #000;">${labelText}</span></span>
         <button class="btn-ghost icon-btn" onclick="editExercise('${ex.id}')">✎</button>
       </div>
       ${historyHtml}
@@ -1005,6 +1006,7 @@ function renderActiveSession() {
         <div class="drag-handle">☰</div>
         <strong class="flex-1">${ex.name} <span class="muscle-tag" style="background:${MUSCLE_COLORS[category]}">${category}</span></strong>
         <button class="btn-ghost" onclick="openLogger('${exId}')">${isDone ? 'EDIT' : 'LOG'}</button>
+        <button class="btn-ghost text-red" onclick="removeExerciseFromSession('${exId}')" title="Remove">✕</button>
       </div>
       <div class="muted small">${sets.length} sets logged</div>
     `;
@@ -1167,6 +1169,21 @@ $("#btnFinishWorkout").addEventListener("click", () => {
 
 // --- LOGGING MODAL ---
 let CURRENT_LOG_EX = null;
+
+function removeExerciseFromSession(exId) {
+  const ex = DB.exercises[exId];
+  const sets = ACTIVE_SESSION.entries[exId] || [];
+
+  // Confirm if there are logged sets
+  if (sets.length > 0) {
+    if (!confirm(`Remove "${ex?.name || 'exercise'}" and its ${sets.length} logged sets?`)) return;
+  }
+
+  // Remove from order and entries
+  ACTIVE_SESSION.order = ACTIVE_SESSION.order.filter(id => id !== exId);
+  delete ACTIVE_SESSION.entries[exId];
+  renderActiveSession();
+}
 
 function openLogger(exId) {
   CURRENT_LOG_EX = exId;
@@ -2188,6 +2205,18 @@ $("#pickerClose").addEventListener("click", () => {
   if (_pickerCancelCallback) {
     _pickerCancelCallback();
     _pickerCancelCallback = null;
+  }
+});
+
+// Close picker modal when clicking outside
+$("#pickerModal").addEventListener("click", (e) => {
+  if (e.target === $("#pickerModal")) {
+    $("#pickerModal").classList.add("hidden");
+    document.body.style.overflow = "";
+    if (_pickerCancelCallback) {
+      _pickerCancelCallback();
+      _pickerCancelCallback = null;
+    }
   }
 });
 

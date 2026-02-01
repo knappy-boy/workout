@@ -74,7 +74,8 @@ main { padding: 15px; max-width: 600px; margin: 0 auto; }
   border: var(--border); box-shadow: var(--shadow); padding: 15px; margin-bottom: 20px;
   background: var(--white); transition: transform 0.1s;
 }
-.neo-card:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0px 0px var(--black); }
+.neo-card:active:not(.no-nudge) { transform: translate(2px, 2px); box-shadow: 2px 2px 0px 0px var(--black); }
+.neo-card.no-nudge { transition: none; }
 
 .bg-red { background: var(--red); color: var(--white); }
 .bg-black { background: var(--black); color: var(--white); }
@@ -162,7 +163,7 @@ button, select, input, textarea { font-family: inherit; font-size: 1rem; outline
 .theme-dark .set-tag { background: #333; border-color: #fff; }
 
 /* MODALS & DRAWERS */
-.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; display: flex; justify-content: center; }
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; display: flex; justify-content: center; touch-action: none; overscroll-behavior: contain; }
 dialog.neo-modal {
   border: var(--border);
   box-shadow: var(--shadow);
