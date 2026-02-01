@@ -1948,11 +1948,12 @@ function updateStatsChart() {
 
     // X axis labels (dates)
     ctx.textAlign = "center";
-    const step = Math.max(1, Math.floor(history.length / 5));
-    history.forEach((h, i) => {
-        if (i % step === 0 || i === history.length - 1) {
+    ctx.fillStyle = textColor;
+    const xLabelStep = Math.max(1, Math.floor(history.length / 5));
+    history.forEach((item, i) => {
+        if (i % xLabelStep === 0 || i === history.length - 1) {
             const x = padding.left + (i / (history.length - 1)) * chartW;
-            const date = new Date(h.date);
+            const date = new Date(item.date);
             const label = `${date.getDate()}/${date.getMonth() + 1}`;
             ctx.fillText(label, x, h - padding.bottom + 20);
         }
@@ -2218,6 +2219,27 @@ $("#pickerModal").addEventListener("click", (e) => {
       _pickerCancelCallback = null;
     }
   }
+});
+
+// Prevent scroll chaining on all overlays
+document.querySelectorAll(".overlay").forEach(overlay => {
+  overlay.addEventListener("touchmove", (e) => {
+    // Only prevent if the touch is directly on the overlay (not on scrollable content inside)
+    const target = e.target;
+    const isScrollable = target.closest(".drawer-body, .picker-list, .modal-box, .day-modal-box");
+    if (!isScrollable) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  // Prevent wheel scroll on overlay background
+  overlay.addEventListener("wheel", (e) => {
+    const target = e.target;
+    const isScrollable = target.closest(".drawer-body, .picker-list, .modal-box, .day-modal-box");
+    if (!isScrollable) {
+      e.preventDefault();
+    }
+  }, { passive: false });
 });
 
 // Theme Toggle
