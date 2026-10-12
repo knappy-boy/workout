@@ -1,0 +1,49 @@
+/* Routine management and the draft-only routine editor. */
+#libraryRoutinesPanel .library-routine{position:relative;overflow:hidden;padding-top:20px}
+#libraryRoutinesPanel .library-routine::before{content:"";position:absolute;top:0;left:0;right:0;height:5px;background:var(--red)}
+#libraryRoutinesPanel .library-routine-heading{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px 14px}
+.library-routine-heading h3{flex:1;min-width:0;margin:0}
+.library-routine-heading>span{font-size:.75rem;font-weight:600;color:#666;padding-top:2px}
+#libraryRoutinesPanel .library-routine-preview{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin:14px 0 18px;min-width:0}
+.library-routine-exercise{display:flex;align-items:center;gap:9px;min-width:0;width:100%;font-size:.82rem;line-height:1.35}
+.library-routine-exercise i{display:block;flex:none;width:11px;height:11px;border:1.5px solid #111;border-radius:4px;background:var(--routine-muscle)}
+.library-routine-exercise>span{min-width:0;overflow-wrap:anywhere}
+#libraryRoutinesPanel .library-routine-actions{padding-top:12px;border-top:1px solid #ddd}
+#libraryRoutinesPanel .routine-edit{flex:2;background:var(--white);border-radius:11px}
+#libraryRoutinesPanel .routine-delete{flex:1;box-shadow:none;border-color:transparent;border-radius:11px;font-size:.73rem}
+#templateBuilderModal .routine-editor{display:flex;flex-direction:column;width:calc(100% - 28px);max-width:500px;max-height:88vh;margin:0;padding:0;overflow:hidden;border:2px solid var(--black);border-radius:22px;background:var(--white);box-shadow:4px 4px 0 var(--black)}
+@supports(height:100dvh){#templateBuilderModal .routine-editor{max-height:88dvh}}
+.routine-editor-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:17px 18px;border-bottom:2px solid var(--black);flex:none}
+.routine-editor-header h3{font-size:1.13rem;line-height:1.3;margin:0;min-width:0}
+.routine-editor-header h3:focus{outline:none}
+.routine-editor-close{display:grid;place-items:center;flex:none;width:42px;height:42px;padding:0;border:2px solid var(--black);border-radius:12px;background:var(--white);color:var(--black);font-size:27px;line-height:1;cursor:pointer}
+.routine-editor-body{min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:22px 18px 24px}
+.routine-name-field{display:grid;gap:9px;font-size:.88rem;font-weight:750}
+.routine-name-field input{width:100%;min-width:0;min-height:48px;padding:12px;font-size:16px;border-radius:12px}
+.routine-exercises-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:26px 0 10px}
+.routine-exercises-heading h4{font-size:1rem;margin:0 0 4px}
+.routine-exercises-heading span{font-size:.76rem;color:#666}
+.routine-exercises-heading button{min-height:44px;padding:10px 14px;border-radius:11px;font-size:.8rem}
+#templateBuilderList{display:flex;flex-direction:column;gap:12px;max-height:none;overflow:visible;margin:0}
+.routine-builder-row{position:relative;display:grid;grid-template-columns:36px minmax(0,1fr) 36px;align-items:center;gap:7px;padding:12px 7px;border:2px solid var(--black);border-radius:14px;background:var(--white);box-shadow:3px 3px 0 var(--black);min-height:79px;isolation:isolate}
+.routine-builder-copy{min-width:0;padding-left:7px;border-left:4px solid var(--routine-muscle)}
+.routine-builder-copy strong{display:block;font-size:.91rem;line-height:1.35;overflow-wrap:anywhere}
+.routine-builder-copy>span{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:.72rem;line-height:1.35;color:#666;flex-wrap:wrap}
+.routine-builder-copy i{width:8px;height:8px;flex:none;border:1px solid #111;border-radius:3px;background:var(--routine-muscle)}
+.routine-drag-handle,.routine-remove{display:grid;place-items:center;width:36px;min-height:46px;padding:0;border:0;border-radius:9px;background:transparent;color:var(--black);cursor:pointer;box-shadow:none;line-height:1}
+.routine-drag-handle{font-size:29px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+.routine-drag-handle:active{cursor:grabbing}
+.routine-remove{font-size:25px;color:#b82020}
+.routine-builder-row.is-dragging{z-index:3;box-shadow:5px 7px 0 var(--black);opacity:.9;pointer-events:none}
+.routine-builder-row.is-drop-target{outline:3px solid var(--red);outline-offset:3px}
+.routine-editor-footer{flex:none;display:grid;gap:10px;padding:16px 18px max(18px,env(safe-area-inset-bottom));border-top:2px solid var(--black);background:var(--white)}
+.routine-editor-footer>button{width:100%;min-height:50px;padding:12px;border-radius:13px;box-shadow:3px 3px 0 var(--black)}
+#templateBuilderError{margin:0;color:#b82020;font-size:.81rem;line-height:1.45}
+#templateBuilderError:empty{display:none}
+.routine-editor button:disabled{opacity:.6;cursor:wait}
+.routine-editor button:focus-visible,.routine-editor input:focus-visible{outline:3px solid var(--red);outline-offset:3px}
+.routine-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.theme-dark .library-routine-heading>span,.theme-dark .routine-exercises-heading span,.theme-dark .routine-builder-copy>span{color:#bbb}
+.theme-dark .routine-remove,.theme-dark #templateBuilderError{color:#ff7777}
+.theme-dark #libraryRoutinesPanel .library-routine-actions{border-color:#444}
+@media(max-width:350px){.routine-editor-header,.routine-editor-footer{padding-left:13px;padding-right:13px}.routine-editor-body{padding:18px 12px 22px}.routine-builder-row{gap:4px;padding:10px 5px}.routine-builder-copy{padding-left:6px}.routine-builder-copy strong{font-size:.85rem}}

@@ -13,7 +13,7 @@ const DEFAULT_DB = {
     increment: 2.5,
     useLbs: false,        // false = kg, true = lbs
     showSuggestions: true,
-    includeCompound: true, // include secondary muscles in charts
+    includeCompound: true, // retained for backup compatibility; charts use only the primary muscle
     trainingGoal: "hypertrophy", // hypertrophy or strength
     bodyweight: null      // user's bodyweight for assisted exercises
   },
@@ -36,42 +36,178 @@ let _bwIsDragging = false;
 let _bwDragStart = 0;
 let _bwPanStart = 0;
 
-let DB = loadDB();
-let ACTIVE_SESSION = null; 
+// Persistent state lives separately from the cached app files.
+const copyState = value => JSON.parse(JSON.stringify(value));
+let DB = copyState(DEFAULT_DB);
+let ACTIVE_SESSION = null;
 let WORKOUT_TIMER = null;
+const STORE = LiftLogStorage;
+let STORE_READY = false, STORAGE_ERROR = null, STORAGE_REVISION = 0, STORAGE_EPOCH = 0;
+let BASE_DB = copyState(DB), BASE_DRAFT = null;
+let QUEUED_DB = copyState(DB), QUEUED_DRAFT = null;
+let SAVE_QUEUE = Promise.resolve(true), PENDING_SAVES = 0, UPDATE_LOCK = false;
+let FINISHING = false, STARTING = false, COMMITTING = false, EXTERNAL_CHANGE = false;
 
-function uid() { return Date.now().toString(36) + Math.random().toString(36).substr(2); }
-
-function loadDB() {
-  const str = localStorage.getItem(DB_KEY);
-  if (!str) return JSON.parse(JSON.stringify(DEFAULT_DB));
-
-  const data = JSON.parse(str);
-  // Simple migration checks
-  if (!data.bodyweight) data.bodyweight = [];
-  if (!data.templates) data.templates = {};
-  if (!data.user) data.user = { theme: "light" };
-
-  // Migrate user settings
-  if (data.user.useLbs === undefined) data.user.useLbs = data.user.unit === "lbs" || false;
-  if (data.user.showSuggestions === undefined) data.user.showSuggestions = true;
-  if (data.user.includeCompound === undefined) data.user.includeCompound = true;
-  if (data.user.trainingGoal === undefined) data.user.trainingGoal = "hypertrophy";
-  if (data.user.bodyweight === undefined) data.user.bodyweight = null;
-  delete data.user.unit; // Remove old unit setting
-
-  // Apply theme immediately
-  document.body.className = `theme-${data.user.theme}`;
-  return data;
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
+function escapeHTML(value) {
+  return String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[c]));
 }
-
-function saveDB() {
-  localStorage.setItem(DB_KEY, JSON.stringify(DB));
+function showNotice(message, kind = "info") {
+  const notice = document.querySelector("#appNotice");
+  notice.textContent = message;
+  notice.dataset.kind = kind;
+  notice.hidden = !message;
 }
+function updateReliabilityStrip() {
+  const save = document.querySelector("#saveStatus");
+  const update = document.querySelector("#updateStatus");
+  const strip = document.querySelector(".save-strip");
+  if (strip) strip.hidden = (save.hidden || !save.textContent) && (update.hidden || !update.textContent);
+}
+function updateSaveStatus() {
+  if ((UPDATE_LOCK || COMMITTING) && typeof clearActiveDrag === 'function') clearActiveDrag();
+  const text = STORAGE_ERROR ? "Not saved — action needed" :
+    !STORE_READY ? "Opening your saved data…" : PENDING_SAVES ? "Saving…" : "Saved on this device";
+  const status = document.querySelector("#saveStatus");
+  status.textContent = text;
+  // Ordinary saves stay quiet in every build; failures remain visible.
+  status.hidden = STORE_READY && !STORAGE_ERROR;
+  const loggerStatus = document.querySelector("#logSaveStatus");
+  if (loggerStatus) {
+    loggerStatus.textContent = text;
+    loggerStatus.hidden = !STORAGE_ERROR;
+    loggerStatus.dataset.kind = STORAGE_ERROR ? "error" : "saved";
+  }
+  updateReliabilityStrip();
+  document.querySelector("#storageProblem").hidden = !STORAGE_ERROR;
+  if (STORAGE_ERROR) document.querySelector("#storageProblemText").textContent = STORAGE_ERROR.message;
+  document.querySelector("#appShell").inert = !STORE_READY || UPDATE_LOCK || COMMITTING;
+}
+function storageFailure(error) {
+  STORAGE_ERROR = error;
+  updateSaveStatus();
+  return false;
+}
+function rememberSnapshot(snapshot) {
+  BASE_DB = copyState(snapshot.db); BASE_DRAFT = copyState(snapshot.draft);
+  STORAGE_REVISION = snapshot.revision; STORAGE_EPOCH = snapshot.epoch;
+}
+function applySnapshot(snapshot) {
+  rememberSnapshot(snapshot);
+  DB = copyState(snapshot.db); ACTIVE_SESSION = copyState(snapshot.draft);
+  QUEUED_DB = copyState(DB); QUEUED_DRAFT = copyState(ACTIVE_SESSION);
+  STORAGE_ERROR = null; STORE_READY = true; EXTERNAL_CHANGE = false;
+  LiftLogTheme.apply(DB.user.theme);
+  updateSaveStatus();
+}
+function queueStateSave(kind) {
+  if (!STORE_READY || STORAGE_ERROR) return Promise.resolve(false);
+  const edited = copyState(kind === "db" ? DB : ACTIVE_SESSION);
+  const base = copyState(kind === "db" ? QUEUED_DB : QUEUED_DRAFT);
+  if (LiftLogStorage.equal(edited, base)) return SAVE_QUEUE;
+  const epoch = STORAGE_EPOCH;
+  if (kind === "db") QUEUED_DB = copyState(edited); else QUEUED_DRAFT = copyState(edited);
+  PENDING_SAVES++; updateSaveStatus();
+  SAVE_QUEUE = SAVE_QUEUE.then(async () => {
+    if (STORAGE_ERROR) return false;
+    try {
+      const result = await (kind === "db" ? STORE.saveDB(edited, base, {epoch}) : STORE.saveDraft(edited, base, {epoch}));
+      STORAGE_REVISION = result.revision;
+      // A write to one part must never adopt another window’s newer baseline.
+      // Otherwise retry/finish could treat stale local data as intentional deletion.
+      if (kind === "db") BASE_DB = copyState(edited); else BASE_DRAFT = copyState(edited);
+      if (kind === "db" && LiftLogStorage.equal(DB, edited)) {
+        DB = copyState(result.db); QUEUED_DB = copyState(DB); BASE_DB = copyState(DB);
+      }
+      if (kind === "draft" && LiftLogStorage.equal(ACTIVE_SESSION, edited)) {
+        ACTIVE_SESSION = copyState(result.draft); QUEUED_DRAFT = copyState(ACTIVE_SESSION);
+      }
+      return true;
+    } catch (error) { return storageFailure(error); }
+  }).finally(() => { PENDING_SAVES--; updateSaveStatus(); });
+  return SAVE_QUEUE;
+}
+function saveDB() { return queueStateSave("db"); }
+function saveDraft() { return queueStateSave("draft"); }
+async function flushSaves() {
+  await saveDB(); await saveDraft(); await SAVE_QUEUE;
+  return !STORAGE_ERROR && STORE_READY;
+}
+function hasOpenEditor() {
+  return Boolean(document.querySelector(".overlay:not(.hidden), dialog[open]")) ||
+    Boolean(document.activeElement && document.activeElement.matches("input, textarea, select") && document.activeElement.value);
+}
+function canUpdate() { return STORE_READY && !STORAGE_ERROR && !PENDING_SAVES && !ACTIVE_SESSION && !FINISHING && !STARTING && !COMMITTING && !hasOpenEditor(); }
+async function refreshSavedData(force = false) {
+  if (!STORE_READY || PENDING_SAVES || (!force && (ACTIVE_SESSION || hasOpenEditor() || STORAGE_ERROR))) return;
+  try {
+    const latest = await STORE.load();
+    // Recheck after the async read: never replace an edit which began during it.
+    if (PENDING_SAVES || (!force && (ACTIVE_SESSION || hasOpenEditor() || STORAGE_ERROR))) return;
+    applySnapshot(latest);
+    renderCurrentTab(document.querySelector(".tab.active").dataset.tab);
+    if (ACTIVE_SESSION) showNotice("An unfinished workout is saved. Choose Resume workout to continue.");
+  } catch (error) { storageFailure(error); }
+}
+function downloadJSON(data, name) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}));
+  const a = document.createElement("a"); a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+// In-page dialogs keep confirmation accessible and reliable in installed mode.
+function askDialog(title, message, text = false) {
+  const dialog = document.querySelector("#appDialog");
+  if (dialog.open) return Promise.resolve(null);
+  document.querySelector("#dialogTitle").textContent = title;
+  document.querySelector("#dialogMessage").textContent = message;
+  const input = document.querySelector("#dialogInput"); input.hidden = !text; input.value = "";
+  return new Promise(resolve => {
+    const finish = accepted => {
+      dialog.close(); clean(); resolve(accepted ? (text ? input.value : true) : (text ? null : false));
+    };
+    const accept = () => finish(true), cancel = () => finish(false);
+    const escape = event => { event.preventDefault(); cancel(); };
+    const clean = () => {
+      document.querySelector("#dialogConfirm").removeEventListener("click", accept);
+      document.querySelector("#dialogCancel").removeEventListener("click", cancel);
+      dialog.removeEventListener("cancel", escape);
+    };
+    document.querySelector("#dialogConfirm").addEventListener("click", accept);
+    document.querySelector("#dialogCancel").addEventListener("click", cancel);
+    dialog.addEventListener("cancel", escape);
+    dialog.showModal(); (text ? input : document.querySelector("#dialogCancel")).focus();
+  });
+}
+function askConfirm(title, message) { return askDialog(title, message); }
+function askText(title, message) { return askDialog(title, message, true); }
+
 
 // --- DOM HELPERS ---
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
+
+// --- MODAL WORKFLOW HELPERS ---
+function resetEditorScroll(scroller) { if (scroller) scroller.scrollTop = 0; }
+function focusModalTitle(title) {
+  title?.setAttribute?.('tabindex', '-1');
+  title?.focus?.({preventScroll: true});
+}
+function trapModalFocus(event, overlay) {
+  if (event.key !== 'Tab') return;
+  const controls = [...overlay.querySelectorAll('button, input, select, textarea, [tabindex="0"]')]
+    .filter(node => !node.disabled && !node.hidden && node.getClientRects().length);
+  const first = controls[0], last = controls[controls.length - 1];
+  if (!first) { event.preventDefault(); return; }
+  if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) {
+    event.preventDefault(); last.focus({preventScroll: true});
+  } else if (!event.shiftKey && (document.activeElement === last || !controls.includes(document.activeElement))) {
+    event.preventDefault(); first.focus({preventScroll: true});
+  }
+}
+function restoreModalFocus(launcher, fallback) {
+  const visible = launcher?.isConnected && (!launcher.getClientRects || launcher.getClientRects().length);
+  (visible ? launcher : fallback)?.focus?.({preventScroll: true});
+}
 
 // --- TABS & NAVIGATION ---
 $$(".tab").forEach(btn => {
@@ -79,12 +215,17 @@ $$(".tab").forEach(btn => {
     $$(".tab").forEach(b => b.classList.remove("active"));
     $$(".panel").forEach(p => p.classList.remove("active"));
     btn.classList.add("active");
+    clearActiveDrag();
+    const navigation = $(".tabs-scroll");
+    navigation.scrollLeft = Math.max(0, btn.offsetLeft - (navigation.clientWidth - btn.offsetWidth) / 2);
     $("#tab-" + btn.dataset.tab).classList.add("active");
     renderCurrentTab(btn.dataset.tab);
+    window.scrollTo(0, 0);
   });
 });
 
 function renderCurrentTab(tab) {
+  updateRecapLinks();
   if (tab === "dashboard") renderDashboard();
   if (tab === "workout") renderWorkoutTab();
   if (tab === "exercises") renderExerciseLibrary();
@@ -95,7 +236,8 @@ function renderCurrentTab(tab) {
 
 // --- DASHBOARD ---
 function renderDashboard() {
-  populateDashboardTemplates();
+  $("#btnQuickStart").textContent = ACTIVE_SESSION ? "RESUME WORKOUT" : "START WORKOUT";
+  updateRecapLinks();
   renderRecentLogs();
   renderCalendar();
 }
@@ -107,7 +249,7 @@ function renderRecentLogs() {
   const recentSessions = DB.sessions.slice(0, 3);
 
   if (recentSessions.length === 0) {
-    container.innerHTML = '<p class="muted">No workouts yet. Start your first one!</p>';
+    container.innerHTML = '<p class="muted">No workouts yet.</p>';
     return;
   }
 
@@ -117,38 +259,34 @@ function renderRecentLogs() {
 
     const date = new Date(sess.start);
     const dateStr = date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-    const exerciseCount = (sess.order || []).length;
+    const completedExercises = LiftLogDates.completedExerciseIds(sess, DB.exercises);
+    const exerciseCount = completedExercises.length;
     const exerciseWord = exerciseCount === 1 ? 'exercise' : 'exercises';
 
     // Get muscle groups worked
     const muscles = new Set();
-    (sess.order || []).forEach(exId => {
+    completedExercises.forEach(exId => {
       const ex = DB.exercises[exId];
-      if (ex && ex.muscle) muscles.add(ex.muscle);
+      if (ex) muscles.add(ex.type === 'cardio' ? 'Cardio' : (ex.muscle || 'Other'));
     });
 
     const templateBadge = sess.templateName
-      ? `<span class="template-badge">${sess.templateName}</span>`
+      ? `<span class="template-badge">${escapeHTML(sess.templateName)}</span>`
       : '<span class="template-badge freestyle">Freestyle</span>';
 
     div.innerHTML = `
       <div class="recent-log-date">${dateStr}</div>
       <div class="recent-log-info">${exerciseCount} ${exerciseWord}</div>
       <div class="recent-log-meta">${templateBadge}</div>
-      <div class="recent-log-muscles">${[...muscles].slice(0, 3).join(', ') || 'No data'}</div>
+      <div class="recent-log-muscles">${escapeHTML([...muscles].slice(0, 3).join(', ')) || 'No data'}</div>
     `;
     container.appendChild(div);
   });
 }
 
-// Quick Start button - starts workout with optional template
+// Both entry points use the same routine cards before starting the timer.
 $("#btnQuickStart").addEventListener("click", () => {
-  const templateId = $("#dashboardTemplateSelect").value;
-  if (templateId) {
-    startWorkout(DB.templates[templateId]);
-  } else {
-    startWorkout();
-  }
+  showNotice("");
   $(".tab[data-tab='workout']").click();
 });
 
@@ -157,7 +295,7 @@ function populateDashboardTemplates() {
   if (!sel) return;
   sel.innerHTML = '<option value="">Freestyle</option>';
   Object.values(DB.templates).forEach(t => {
-    sel.innerHTML += `<option value="${t.id}">${t.name}</option>`;
+    sel.innerHTML += `<option value="${t.id}">${escapeHTML(t.name)}</option>`;
   });
 }
 
@@ -175,91 +313,160 @@ $("#btnLogBW").addEventListener("click", () => {
 });
 
 // Bodyweight period tabs
+const _chartMotionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+const _chartAnimator = LiftLogChartMotion.createAnimator({
+  requestFrame: callback => requestAnimationFrame(callback),
+  cancelFrame: frame => cancelAnimationFrame(frame),
+  now: () => performance.now(),
+  reduced: () => _chartMotionPreference.matches || document.hidden
+});
+let _bwPaintFrame = null, _statsResizeFrame = null, _bwVisualAnimation = null;
+let _bwPointCount = 0, _bwPlotWidth = 1;
+const bwCanvas = $("#bwChart");
+function queueBodyweightPaint() {
+  if (_bwPaintFrame !== null) return;
+  _bwPaintFrame = requestAnimationFrame(() => { _bwPaintFrame = null; drawBodyweightChart(); });
+}
+function stopBodyweightGesture() {
+  _bwIsDragging = false;
+  _bwTouchMode = "none";
+  bwCanvas.style.cursor = "grab";
+}
+function zoomBodyweight(nextZoom, anchor = 0.5) {
+  const next = Math.max(1, Math.min(10, nextZoom));
+  _bwPanOffset = LiftLogChartMotion.anchoredZoom(_bwPointCount, _bwZoom, _bwPanOffset, next, anchor);
+  _bwZoom = next;
+  queueBodyweightPaint();
+}
+function bodyweightAnchor(clientX) {
+  const rect = bwCanvas.getBoundingClientRect();
+  return Math.max(0, Math.min(1, (clientX - rect.left - 40) / Math.max(1, rect.width - 60)));
+}
+function bodyweightPan(dx, startOffset, startZoom = _bwZoom) {
+  const { count } = LiftLogChartMotion.viewport(_bwPointCount, startZoom, startOffset);
+  _bwPanOffset = LiftLogChartMotion.viewport(_bwPointCount, _bwZoom, startOffset + dx / _bwPlotWidth * Math.max(0, count - 1)).offset;
+  queueBodyweightPaint();
+}
 document.querySelectorAll(".bw-period-tab").forEach(tab => {
+  tab.setAttribute("aria-pressed", String(tab.classList.contains("active")));
   tab.addEventListener("click", () => {
-    document.querySelectorAll(".bw-period-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".bw-period-tab").forEach(t => { t.classList.remove("active"); t.setAttribute("aria-pressed", "false"); });
     tab.classList.add("active");
+    tab.setAttribute("aria-pressed", "true");
     _bwPeriod = tab.dataset.period;
     _bwZoom = 1;
     _bwPanOffset = 0;
-    drawBodyweightChart();
+    stopBodyweightGesture();
+    drawBodyweightChart({ animate: true });
   });
 });
 
-// Bodyweight chart zoom/pan
-const bwCanvas = $("#bwChart");
-
-// Mouse wheel zoom
-bwCanvas.addEventListener("wheel", (e) => {
+// Gesture paints share one animation frame. One-finger vertical drags continue
+// to scroll the page; horizontal drags and two-finger pinches own only the plot.
+bwCanvas.addEventListener("wheel", e => {
   e.preventDefault();
-  const delta = e.deltaY > 0 ? 0.9 : 1.1;
-  _bwZoom = Math.max(1, Math.min(10, _bwZoom * delta));
-  drawBodyweightChart();
+  zoomBodyweight(_bwZoom * Math.exp(-Math.max(-150, Math.min(150, e.deltaY)) * 0.003), bodyweightAnchor(e.clientX));
 }, { passive: false });
-
-// Mouse drag for panning
-bwCanvas.addEventListener("mousedown", (e) => {
+bwCanvas.addEventListener("mousedown", e => {
+  if (e.button !== 0) return;
   _bwIsDragging = true;
   _bwDragStart = e.clientX;
   _bwPanStart = _bwPanOffset;
   bwCanvas.style.cursor = "grabbing";
 });
-
-document.addEventListener("mousemove", (e) => {
-  if (!_bwIsDragging) return;
-  const dx = _bwDragStart - e.clientX;
-  const sensitivity = 0.5;
-  _bwPanOffset = _bwPanStart + dx * sensitivity * _bwZoom / 50;
-  drawBodyweightChart();
+document.addEventListener("mousemove", e => {
+  if (_bwIsDragging && _bwTouchMode === "none") bodyweightPan(_bwDragStart - e.clientX, _bwPanStart);
 });
-
-document.addEventListener("mouseup", () => {
-  if (_bwIsDragging) {
+document.addEventListener("mouseup", stopBodyweightGesture);
+window.addEventListener("blur", stopBodyweightGesture);
+let _bwTouchMode = "none", _bwTouchStartDist = 0, _bwTouchStartZoom = 1;
+let _bwTouchStartX = 0, _bwTouchStartY = 0, _bwPinchAnchor = 0.5;
+function startBodyweightTouch(touches) {
+  _bwPanStart = _bwPanOffset;
+  _bwTouchStartZoom = _bwZoom;
+  if (touches.length === 2) {
+    _bwTouchMode = "pinch";
     _bwIsDragging = false;
-    bwCanvas.style.cursor = "grab";
-  }
-});
-
-// Touch pinch zoom and pan
-let _bwTouchStartDist = 0;
-let _bwTouchStartZoom = 1;
-let _bwTouchStartX = 0;
-
-bwCanvas.addEventListener("touchstart", (e) => {
+    _bwTouchStartDist = Math.max(1, Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY));
+    _bwPinchAnchor = bodyweightAnchor((touches[0].clientX + touches[1].clientX) / 2);
+  } else if (touches.length === 1) {
+    _bwTouchMode = "pending";
+    _bwIsDragging = false;
+    _bwTouchStartX = touches[0].clientX;
+    _bwTouchStartY = touches[0].clientY;
+  } else stopBodyweightGesture();
+}
+bwCanvas.addEventListener("touchstart", e => startBodyweightTouch(e.touches), { passive: true });
+bwCanvas.addEventListener("touchmove", e => {
   if (e.touches.length === 2) {
-    // Pinch zoom start
-    const dx = e.touches[0].clientX - e.touches[1].clientX;
-    const dy = e.touches[0].clientY - e.touches[1].clientY;
-    _bwTouchStartDist = Math.sqrt(dx * dx + dy * dy);
-    _bwTouchStartZoom = _bwZoom;
+    if (_bwTouchMode !== "pinch") startBodyweightTouch(e.touches);
+    if (e.cancelable) e.preventDefault();
+    const distance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    const nextZoom = Math.max(1, Math.min(10, _bwTouchStartZoom * distance / _bwTouchStartDist));
+    _bwPanOffset = LiftLogChartMotion.anchoredZoom(_bwPointCount, _bwTouchStartZoom, _bwPanStart, nextZoom, _bwPinchAnchor);
+    _bwZoom = nextZoom;
+    queueBodyweightPaint();
   } else if (e.touches.length === 1) {
-    // Pan start
-    _bwIsDragging = true;
-    _bwTouchStartX = e.touches[0].clientX;
-    _bwPanStart = _bwPanOffset;
-  }
-}, { passive: true });
-
-bwCanvas.addEventListener("touchmove", (e) => {
-  if (e.touches.length === 2) {
-    // Pinch zoom
-    const dx = e.touches[0].clientX - e.touches[1].clientX;
-    const dy = e.touches[0].clientY - e.touches[1].clientY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const scale = dist / _bwTouchStartDist;
-    _bwZoom = Math.max(1, Math.min(10, _bwTouchStartZoom * scale));
-    drawBodyweightChart();
-  } else if (e.touches.length === 1 && _bwIsDragging) {
-    // Pan
     const dx = _bwTouchStartX - e.touches[0].clientX;
-    const sensitivity = 0.3;
-    _bwPanOffset = _bwPanStart + dx * sensitivity * _bwZoom / 30;
-    drawBodyweightChart();
+    const dy = _bwTouchStartY - e.touches[0].clientY;
+    if (_bwTouchMode === "pending") {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 6) return;
+      _bwTouchMode = Math.abs(dx) > Math.abs(dy) ? "pan" : "vertical";
+    }
+    if (_bwTouchMode !== "pan") return;
+    if (e.cancelable) e.preventDefault();
+    bodyweightPan(dx, _bwPanStart, _bwTouchStartZoom);
   }
-}, { passive: true });
-
-bwCanvas.addEventListener("touchend", () => {
-  _bwIsDragging = false;
+}, { passive: false });
+bwCanvas.addEventListener("touchend", e => startBodyweightTouch(e.touches), { passive: true });
+bwCanvas.addEventListener("touchcancel", stopBodyweightGesture, { passive: true });
+bwCanvas.tabIndex = 0;
+bwCanvas.addEventListener("keydown", e => {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+  if (e.key === "+" || e.key === "=") zoomBodyweight(_bwZoom * 1.3);
+  else if (e.key === "-") zoomBodyweight(_bwZoom / 1.3);
+  else if (e.key === "Home" || e.key === "0") { _bwZoom = 1; _bwPanOffset = 0; queueBodyweightPaint(); }
+  else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    const { count } = LiftLogChartMotion.viewport(_bwPointCount, _bwZoom, _bwPanOffset);
+    _bwPanOffset = LiftLogChartMotion.viewport(_bwPointCount, _bwZoom, _bwPanOffset + (e.key === "ArrowLeft" ? -1 : 1) * Math.max(0.2, count / 5)).offset;
+    queueBodyweightPaint();
+  } else return;
+  e.preventDefault();
+});
+const _bwControls = document.createElement("div");
+_bwControls.className = "bw-chart-controls";
+_bwControls.setAttribute("role", "group");
+_bwControls.setAttribute("aria-label", "Bodyweight chart zoom");
+[["−", "Zoom out", () => zoomBodyweight(_bwZoom / 1.3)], ["+", "Zoom in", () => zoomBodyweight(_bwZoom * 1.3)], ["↺", "Reset bodyweight zoom", () => { _bwZoom = 1; _bwPanOffset = 0; queueBodyweightPaint(); }]].forEach(([text, label, action]) => {
+  const button = document.createElement("button");
+  button.type = "button"; button.className = "btn-white btn-small";
+  button.textContent = text; button.setAttribute("aria-label", label); button.addEventListener("click", action);
+  _bwControls.appendChild(button);
+});
+document.querySelector(".bw-chart-toolbar").appendChild(_bwControls);
+const _bwHint = document.querySelector(".bw-zoom-hint");
+if (_bwHint) _bwHint.textContent = "Tap a point for its value · pinch to zoom · drag to pan";
+function redrawVisibleStats() {
+  if (_statsResizeFrame !== null) return;
+  _statsResizeFrame = requestAnimationFrame(() => {
+    _statsResizeFrame = null;
+    if (!$("#tab-stats").classList.contains("active")) return;
+    drawBodyweightChart(); updateStatsChart(); renderBreakdownChart();
+  });
+}
+window.addEventListener("resize", redrawVisibleStats, { passive: true });
+if (typeof ResizeObserver !== "undefined") {
+  const chartResizeObserver = new ResizeObserver(redrawVisibleStats);
+  chartResizeObserver.observe(bwCanvas.parentElement);
+}
+_chartMotionPreference.addEventListener("change", () => {
+  if (_chartMotionPreference.matches) { _chartAnimator.finishAll(); _bwVisualAnimation?.cancel(); }
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) return;
+  _chartAnimator.finishAll(); _bwVisualAnimation?.cancel(); stopBodyweightGesture();
+  if (_bwPaintFrame !== null) { cancelAnimationFrame(_bwPaintFrame); _bwPaintFrame = null; }
+  if (_statsResizeFrame !== null) { cancelAnimationFrame(_statsResizeFrame); _statsResizeFrame = null; }
 });
 
 function updateBodyweightUnitLabel() {
@@ -298,148 +505,172 @@ function renderBodyweightEntries() {
   });
 }
 
-function deleteBodyweightEntry(index) {
-  if (!confirm("Delete this bodyweight entry?")) return;
+async function deleteBodyweightEntry(index) {
+  if (!await askConfirm("Delete bodyweight entry?", "This entry will be removed from your chart.")) return;
   DB.bodyweight.splice(index, 1);
   saveDB();
   drawBodyweightChart();
   renderBodyweightEntries();
 }
 
-function drawBodyweightChart() {
+function updateChartInspection(canvas, items) {
+  let state = canvas._liftlogInspection;
+  if (!state) {
+    const readout = document.createElement("output");
+    readout.className = "chart-readout"; readout.hidden = true;
+    readout.setAttribute("aria-live", "polite");
+    canvas.parentElement.appendChild(readout);
+    state = canvas._liftlogInspection = { items: [], selected: -1, readout, start: null, moved: false };
+    canvas.tabIndex = 0;
+    function show(index) {
+      state.selected = index;
+      readout.hidden = index < 0;
+      readout.textContent = index < 0 ? "" : state.items[index].label;
+    }
+    canvas.addEventListener("pointerdown", e => {
+      state.moved = !e.isPrimary;
+      state.start = { x: e.clientX, y: e.clientY };
+    });
+    canvas.addEventListener("pointermove", e => {
+      if (state.start && Math.hypot(e.clientX - state.start.x, e.clientY - state.start.y) > 6) state.moved = true;
+    });
+    canvas.addEventListener("pointercancel", () => { state.moved = true; state.start = null; });
+    canvas.addEventListener("click", e => {
+      if (state.moved) return;
+      _chartAnimator.finish(canvas);
+      const rect = canvas.getBoundingClientRect();
+      show(LiftLogChartMotion.hitTest(state.items, e.clientX - rect.left, e.clientY - rect.top));
+    });
+    canvas.addEventListener("keydown", e => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === "Escape") { show(-1); e.preventDefault(); return; }
+      const bodyweight = canvas.id === "bwChart";
+      if (bodyweight && !e.shiftKey && e.key !== "Enter") return;
+      if (!["ArrowLeft", "ArrowRight", "Home", "End", "Enter"].includes(e.key)) return;
+      _chartAnimator.finish(canvas);
+      if (!state.items.length) return;
+      let next = state.selected;
+      if (e.key === "Home") next = 0;
+      else if (e.key === "End" || e.key === "Enter" || next < 0) next = state.items.length - 1;
+      else next = Math.max(0, Math.min(state.items.length - 1, next + (e.key === "ArrowLeft" ? -1 : 1)));
+      show(next); e.preventDefault();
+    });
+    canvas.addEventListener("blur", () => show(-1));
+  }
+  state.items = items; state.selected = -1; state.readout.hidden = true;
+}
+
+function updateChartDataTable(canvas, captionText, rows) {
+  let table = document.getElementById(`${canvas.id}DataTable`);
+  if (!table) {
+    // Tables retain intrinsic minimum widths. Clip a normal block around the
+    // table so its cells cannot enlarge the page's horizontal scroll area.
+    const wrapper = document.createElement("div"); wrapper.className = "chart-sr-only";
+    table = document.createElement("table"); table.id = `${canvas.id}DataTable`;
+    wrapper.appendChild(table); canvas.parentElement.insertAdjacentElement("afterend", wrapper);
+  }
+  table.replaceChildren();
+  const caption = document.createElement("caption"); caption.textContent = captionText; table.appendChild(caption);
+  rows.forEach(([label, value]) => {
+    const row = document.createElement("tr"), th = document.createElement("th"), td = document.createElement("td");
+    th.scope = "row"; th.textContent = label; td.textContent = value; row.append(th, td); table.appendChild(row);
+  });
+}
+
+function drawBodyweightChart({ animate = false } = {}) {
   const canvas = $("#bwChart");
-
-  // Filter data by period
-  let data = [...DB.bodyweight];
   const now = new Date();
-
+  let data = [...DB.bodyweight];
   if (_bwPeriod === "month") {
-    const cutoff = new Date(now);
-    cutoff.setDate(cutoff.getDate() - 30);
+    const cutoff = new Date(now); cutoff.setDate(cutoff.getDate() - 30);
     data = data.filter(d => new Date(d.date) >= cutoff);
   } else if (_bwPeriod === "year") {
-    const cutoff = new Date(now);
-    cutoff.setFullYear(cutoff.getFullYear() - 1);
+    const cutoff = new Date(now); cutoff.setFullYear(cutoff.getFullYear() - 1);
     data = data.filter(d => new Date(d.date) >= cutoff);
   }
-  // "all" shows everything
-
-  // High-DPI canvas setup
-  const dpr = window.devicePixelRatio || 1;
+  _bwPointCount = data.length;
   const rect = canvas.getBoundingClientRect();
-  canvas.width = rect.width * dpr;
-  canvas.height = rect.height * dpr;
+  if (rect.width <= 0 || rect.height <= 0) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (canvas.width !== Math.round(rect.width * dpr) || canvas.height !== Math.round(rect.height * dpr)) {
+    canvas.width = Math.round(rect.width * dpr); canvas.height = Math.round(rect.height * dpr);
+  }
   const ctx = canvas.getContext("2d");
-  ctx.scale(dpr, dpr);
-  const w = rect.width;
-  const h = rect.height;
-
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const w = rect.width, h = rect.height;
   const isDark = document.body.classList.contains("theme-dark");
-  const textColor = isDark ? "#fff" : "#000";
-
-  if (data.length < 2) {
-    ctx.clearRect(0, 0, w, h);
-    ctx.font = "14px -apple-system, sans-serif";
-    ctx.fillStyle = textColor;
-    ctx.textAlign = "center";
-    ctx.fillText("Log more data to see chart", w / 2, h / 2);
-    return;
-  }
-
-  const padding = { top: 20, right: 20, bottom: 40, left: 40 };
-  const chartW = w - padding.left - padding.right;
-  const chartH = h - padding.top - padding.bottom;
-
-  // Apply zoom - calculate visible range
-  const totalPoints = data.length;
-  const visiblePoints = Math.max(2, Math.floor(totalPoints / _bwZoom));
-
-  // Clamp pan offset
-  const maxOffset = Math.max(0, totalPoints - visiblePoints);
-  _bwPanOffset = Math.max(0, Math.min(_bwPanOffset, maxOffset));
-
-  const startIdx = Math.floor(_bwPanOffset);
-  const endIdx = Math.min(totalPoints, startIdx + visiblePoints);
-  const visibleData = data.slice(startIdx, endIdx);
-
-  if (visibleData.length < 2) {
-    ctx.clearRect(0, 0, w, h);
-    return;
-  }
-
-  // Convert values to display unit
-  const values = visibleData.map(d => convertWeight(d.kg));
-  const dataMin = Math.min(...values);
-  const dataMax = Math.max(...values);
-
-  // Round to nice intervals (5 for kg, 10 for lbs)
-  const stepSize = DB.user.useLbs ? 10 : 5;
-  const minVal = Math.floor(dataMin / stepSize) * stepSize - stepSize;
-  const maxVal = Math.ceil(dataMax / stepSize) * stepSize + stepSize;
-  const range = maxVal - minVal || 1;
-  const numSteps = Math.ceil(range / stepSize);
-
+  const textColor = LiftLogTheme.chartColors().ink;
   ctx.clearRect(0, 0, w, h);
-
-  // Draw Y axis labels (weight) - nice round numbers
-  ctx.font = "11px -apple-system, sans-serif";
-  ctx.fillStyle = textColor;
-  ctx.textAlign = "right";
-  for (let i = 0; i <= numSteps; i++) {
-    const val = minVal + (i * stepSize);
-    if (val > maxVal) break;
-    const y = padding.top + chartH - ((val - minVal) / range) * chartH;
-    ctx.fillText(val.toFixed(0), padding.left - 8, y + 4);
-    // Grid line
-    ctx.strokeStyle = isDark ? "#333" : "#ddd";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(padding.left, y);
-    ctx.lineTo(w - padding.right, y);
-    ctx.stroke();
+  canvas.setAttribute("role", "img");
+  updateChartInspection(canvas, []);
+  updateChartDataTable(canvas, `Bodyweight · ${getWeightUnit()}`, data.map(item => [new Date(item.date).toLocaleDateString(), convertWeight(item.kg)]));
+  if (data.length < 2) {
+    ctx.font = "14px -apple-system, sans-serif"; ctx.fillStyle = textColor; ctx.textAlign = "center";
+    ctx.fillText("Log more data to see chart", w / 2, h / 2);
+    canvas.setAttribute("aria-label", "Bodyweight chart. Log at least two entries in this period to see a trend.");
+    return;
   }
-
-  // Draw X axis labels (dates)
+  const padding = { top: 20, right: 20, bottom: 40, left: 40 };
+  const { width: chartW, height: chartH } = LiftLogChartMotion.plotGeometry(w, h, padding);
+  _bwPlotWidth = Math.max(1, chartW);
+  const view = LiftLogChartMotion.viewport(data.length, _bwZoom, _bwPanOffset);
+  _bwPanOffset = view.offset;
+  const span = Math.max(1, view.count - 1);
+  const startIdx = Math.floor(view.offset), endIdx = Math.min(data.length - 1, Math.ceil(view.offset + span));
+  const values = data.map(d => convertWeight(d.kg));
+  // A fixed Y range for the selected period prevents vertical jumps while panning.
+  const stepSize = DB.user.useLbs ? 10 : 5;
+  const minVal = Math.floor(Math.min(...values) / stepSize) * stepSize - stepSize;
+  const maxVal = Math.ceil(Math.max(...values) / stepSize) * stepSize + stepSize;
+  const range = maxVal - minVal || 1;
+  const pointX = i => padding.left + (i - view.offset) / span * chartW;
+  const pointY = value => padding.top + chartH - (value - minVal) / range * chartH;
+  ctx.font = "11px -apple-system, sans-serif"; ctx.fillStyle = textColor; ctx.textAlign = "right";
+  for (let value = minVal; value <= maxVal; value += stepSize) {
+    const y = pointY(value);
+    ctx.fillText(value.toFixed(0), padding.left - 8, y + 4);
+    ctx.strokeStyle = LiftLogTheme.chartColors().grid; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(w - padding.right, y); ctx.stroke();
+  }
+  const labelStep = Math.max(1, Math.ceil(view.count / 5));
   ctx.textAlign = "center";
-  ctx.fillStyle = textColor;
-  const labelStep = Math.max(1, Math.floor(visibleData.length / 5));
-  visibleData.forEach((d, i) => {
-    if (i % labelStep === 0 || i === visibleData.length - 1) {
-      const x = padding.left + (i / Math.max(1, visibleData.length - 1)) * chartW;
-      const date = new Date(d.date);
+  const xLabels = [];
+  for (let i = startIdx; i <= endIdx; i++) {
+    const x = pointX(i);
+    if (x < padding.left || x > w - padding.right) continue;
+    if (i % labelStep === 0 || i === data.length - 1) {
+      const date = new Date(data[i].date);
       const label = `${date.getDate()}/${date.getMonth() + 1}`;
-      ctx.fillText(label, x, h - padding.bottom + 20);
+      xLabels.push({ x, label, width: ctx.measureText?.(label)?.width ?? label.length * 6 });
     }
-  });
-
-  // Draw line
-  ctx.beginPath();
-  ctx.strokeStyle = "#FF3333";
-  ctx.lineWidth = 3;
-  values.forEach((val, i) => {
-    const x = padding.left + (i / Math.max(1, values.length - 1)) * chartW;
-    const y = padding.top + chartH - ((val - minVal) / range) * chartH;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-
-  // Draw dots
-  ctx.fillStyle = "#FF3333";
-  values.forEach((val, i) => {
-    const x = padding.left + (i / Math.max(1, values.length - 1)) * chartW;
-    const y = padding.top + chartH - ((val - minVal) / range) * chartH;
-    ctx.beginPath();
-    ctx.arc(x, y, 5, 0, Math.PI * 2);
-    ctx.fill();
-  });
-
-  // Show zoom indicator if zoomed in
+  }
+  LiftLogChartMotion.spacedAxisLabels(xLabels).forEach(item => ctx.fillText(item.label, item.x, h - padding.bottom + 20));
+  ctx.save(); ctx.beginPath(); ctx.rect(padding.left - 1, padding.top - 6, chartW + 2, chartH + 12); ctx.clip();
+  ctx.beginPath(); ctx.strokeStyle = LiftLogTheme.chartColors().accent; ctx.lineWidth = 3;
+  for (let i = startIdx; i <= endIdx; i++) {
+    if (i === startIdx) ctx.moveTo(pointX(i), pointY(values[i])); else ctx.lineTo(pointX(i), pointY(values[i]));
+  }
+  ctx.stroke(); ctx.restore();
+  // Clip the connecting line, not the visible points: edge dots need their full
+  // radius inside the canvas margins, including while the chart is panned.
+  ctx.fillStyle = LiftLogTheme.chartColors().accent; ctx.strokeStyle = LiftLogTheme.chartColors().accent; ctx.lineWidth = 1.3;
+  for (let i = startIdx; i <= endIdx; i++) {
+    const x = pointX(i);
+    if (x < padding.left || x > w - padding.right) continue;
+    ctx.beginPath(); ctx.arc(x, pointY(values[i]), 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+  updateChartInspection(canvas, data.map((item, i) => ({ x: pointX(i), y: pointY(values[i]),
+    label: `${new Date(item.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} · ${values[i]} ${getWeightUnit()}`
+  })).filter(point => point.x >= padding.left && point.x <= w - padding.right));
   if (_bwZoom > 1) {
-    ctx.font = "10px -apple-system, sans-serif";
-    ctx.fillStyle = textColor;
-    ctx.textAlign = "right";
+    ctx.font = "10px -apple-system, sans-serif"; ctx.fillStyle = textColor; ctx.textAlign = "right";
     ctx.fillText(`${Math.round(_bwZoom * 100)}%`, w - 5, 15);
+  }
+  const first = data[startIdx], last = data[endIdx];
+  canvas.setAttribute("aria-label", `Bodyweight chart, ${data.length} entries in this period. Visible from ${new Date(first.date).toLocaleDateString()} at ${values[startIdx]} ${getWeightUnit()} to ${new Date(last.date).toLocaleDateString()} at ${values[endIdx]} ${getWeightUnit()}. Tap a point for its value. Use plus and minus to zoom, left and right arrows to pan, Home to reset; Enter or Shift and arrow keys to read values, Escape to dismiss.`);
+  _bwVisualAnimation?.cancel();
+  if (animate && !_chartMotionPreference.matches && !document.hidden && canvas.animate) {
+    _bwVisualAnimation = canvas.animate([{ opacity: 0.45 }, { opacity: 1 }], { duration: 180, easing: "ease-out" });
   }
 }
 
@@ -472,7 +703,13 @@ function renderCalendar() {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   const today = new Date();
-  const todayStr = today.toISOString().split("T")[0];
+  const todayStr = LiftLogDates.localDayKey(today);
+  const workoutsByDay = new Map();
+  DB.sessions.forEach(session => {
+    const key = LiftLogDates.localDayKey(session.start);
+    if (!workoutsByDay.has(key)) workoutsByDay.set(key, []);
+    workoutsByDay.get(key).push(session);
+  });
 
   // Empty cells for days before month starts
   for (let i = 0; i < firstDay; i++) {
@@ -484,7 +721,7 @@ function renderCalendar() {
   // Days of the month
   for (let day = 1; day <= daysInMonth; day++) {
     const date = new Date(year, month, day);
-    const iso = date.toISOString().split("T")[0];
+    const iso = LiftLogDates.localDayKey(date);
 
     const div = document.createElement("div");
     div.className = "cal-day";
@@ -493,7 +730,7 @@ function renderCalendar() {
     if (iso === todayStr) div.classList.add("today");
 
     // Find workouts on this day
-    const dayWorkouts = DB.sessions.filter(s => s.start.startsWith(iso));
+    const dayWorkouts = workoutsByDay.get(iso) || [];
 
     if (dayWorkouts.length > 0) {
       div.classList.add("has-workout");
@@ -501,7 +738,7 @@ function renderCalendar() {
       // Get unique muscle groups worked (including cardio)
       const muscles = new Set();
       dayWorkouts.forEach(sess => {
-        (sess.order || []).forEach(exId => {
+        LiftLogDates.completedExerciseIds(sess, DB.exercises).forEach(exId => {
           const ex = DB.exercises[exId];
           if (ex) {
             if (ex.type === 'cardio') {
@@ -521,7 +758,13 @@ function renderCalendar() {
       div.innerHTML = `<span class="cal-day-num">${day}</span><div class="cal-dots">${dotsHtml}</div>`;
 
       // Click to view details
-      div.onclick = () => showDayDetails(iso, dayWorkouts);
+      div.setAttribute('role', 'button'); div.tabIndex = 0;
+      div.setAttribute('aria-label', `${dayWorkouts.length} workout${dayWorkouts.length === 1 ? '' : 's'} on ${iso}`);
+      div.onclick = () => showDayDetails(iso, dayWorkouts, div);
+      div.addEventListener('keydown', event => {
+        if (!['Enter', ' '].includes(event.key)) return;
+        event.preventDefault(); showDayDetails(iso, dayWorkouts, div);
+      });
     } else {
       div.innerHTML = `<span class="cal-day-num">${day}</span>`;
     }
@@ -530,8 +773,9 @@ function renderCalendar() {
   }
 }
 
-function showDayDetails(iso, workouts) {
-  const date = new Date(iso);
+function showDayDetails(iso, workouts, launcher = document.activeElement) {
+  DAY_RETURN_FOCUS = launcher;
+  const date = LiftLogDates.parseLocalDay(iso);
   const dateStr = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
   $("#dayModalTitle").textContent = dateStr;
 
@@ -539,12 +783,12 @@ function showDayDetails(iso, workouts) {
   workouts.forEach(sess => {
     // Show workout notes if any
     if (sess.notes) {
-      html += `<div class="history-notes" style="margin-bottom:10px;"><em>${sess.notes}</em></div>`;
+      html += `<div class="history-notes" style="margin-bottom:10px;"><em>${escapeHTML(sess.notes)}</em></div>`;
     }
 
-    (sess.order || []).forEach(exId => {
+    LiftLogDates.completedExerciseIds(sess, DB.exercises).forEach(exId => {
       const ex = DB.exercises[exId];
-      const sets = sess.entries[exId];
+      const sets = LiftLogDates.completedSets(sess.entries[exId], ex);
       if (!ex || !sets || sets.length === 0) return;
 
       // Get muscle group and color
@@ -553,35 +797,45 @@ function showDayDetails(iso, workouts) {
 
       const unit = getWeightUnit();
       const setsHtml = sets.map(s => {
-        if (s.w) {
-          const displayW = convertWeight(parseFloat(s.w));
-          return `<span class="set-tag">${displayW}${unit} × ${s.r}</span>`;
+        if (ex.type !== 'cardio') {
+          return `<span class="set-tag">${escapeHTML(LiftLogLogging.formatStrengthSet(s, ex, unit))}</span>`;
         }
-        if (s.time) return `<span class="set-tag">${s.time}m / ${s.dist}${ex.cardioMetric || 'km'}</span>`;
-        return "";
+        return `<span class="set-tag">${escapeHTML(s.time || '—')}m / ${escapeHTML(s.dist || '—')}${escapeHTML(ex.cardioMetric || 'km')}</span>`;
       }).join("");
 
-      html += `<div class="day-exercise"><strong>${ex.name}</strong> <span class="muscle-tag" style="background:${color}">${category}</span><div style="margin-top:8px">${setsHtml}</div></div>`;
+      html += `<div class="day-exercise"><strong>${escapeHTML(ex.name)}</strong> <span class="muscle-tag" style="background:${color}">${escapeHTML(category)}</span><div style="margin-top:8px">${setsHtml}</div></div>`;
     });
   });
 
   if (!html) html = '<p class="muted">No exercises recorded</p>';
   $("#dayModalContent").innerHTML = html;
+  const box = $("#dayModal .day-modal-box");
+  box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-labelledby', 'dayModalTitle');
   $("#dayModal").classList.remove("hidden");
-  document.body.style.overflow = "hidden"; // Prevent background scroll
+  LOGGER_SCROLL_LOCK.acquire('calendar-day');
+  resetEditorScroll($("#dayModalContent"));
+  focusModalTitle($("#dayModalTitle"));
 }
 
-$("#btnCloseDayModal").addEventListener("click", () => {
+let DAY_RETURN_FOCUS = null;
+function closeDayDetails() {
   $("#dayModal").classList.add("hidden");
-  document.body.style.overflow = ""; // Restore scroll
-});
+  LOGGER_SCROLL_LOCK.release('calendar-day');
+  restoreModalFocus(DAY_RETURN_FOCUS, $("#btnQuickStart"));
+  DAY_RETURN_FOCUS = null;
+  LiftLogUpdates.notifySafe();
+}
+$("#btnCloseDayModal").addEventListener("click", closeDayDetails);
 
 // Close day modal when clicking outside the box
 $("#dayModal").addEventListener("click", (e) => {
   if (e.target === $("#dayModal")) {
-    $("#dayModal").classList.add("hidden");
-    document.body.style.overflow = ""; // Restore scroll
+    closeDayDetails();
   }
+});
+$("#dayModal").addEventListener('keydown', event => {
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeDayDetails(); return; }
+  trapModalFocus(event, $("#dayModal"));
 });
 
 $("#btnPrevMonth").addEventListener("click", () => {
@@ -621,13 +875,14 @@ function migrateExerciseCategories() {
 
 function renderExerciseLibrary() {
   renderLibraryTabs();
+  renderTemplates();
 
   const container = $("#exerciseList");
   container.innerHTML = "";
 
   const search = $("#searchEx").value.toLowerCase();
 
-  const allExercises = Object.values(DB.exercises);
+  const allExercises = Object.values(DB.exercises).filter(ex => !ex.archived);
 
   // Show empty state if no exercises exist at all
   if (allExercises.length === 0) {
@@ -658,7 +913,7 @@ function renderExerciseLibrary() {
     // Determine category for styling - cardio uses type, others use muscle
     const category = ex.type === 'cardio' ? 'Cardio' : (ex.muscle || 'Other');
     const div = document.createElement("div");
-    div.className = `ex-item-card ex-cat-${category}`;
+    div.className = `ex-item-card ex-cat-${escapeHTML(category)}`;
 
     // Get last session data for this exercise
     const lastSession = findLastSessionWithExercise(ex.id);
@@ -669,11 +924,11 @@ function renderExerciseLibrary() {
       const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
       const unit = getWeightUnit();
       const sets = lastSession.sets.map(s => {
-        if (s.w) {
-          const displayW = convertWeight(parseFloat(s.w));
-          return `${displayW}${unit} × ${s.r}`;
+        if (ex.type !== 'cardio' && Number(s.r) > 0) {
+          const raw = LiftLogLogging.formatStrengthSet(s, ex, unit), estimate = LiftLogLogging.estimatedSetText(s, unit);
+          return `${escapeHTML(raw)}${estimate ? ` <span class="muted">(${escapeHTML(estimate)})</span>` : ''}`;
         }
-        if (s.time) return `${s.time}m / ${s.dist}${ex.cardioMetric || 'km'}`;
+        if (Number(s.time) > 0 || Number(s.dist) > 0) return `${escapeHTML(s.time || 0)}m / ${escapeHTML(s.dist || 0)}${escapeHTML(ex.cardioMetric || 'km')}`;
         return '';
       }).filter(Boolean).join(', ');
 
@@ -686,8 +941,8 @@ function renderExerciseLibrary() {
 
     div.innerHTML = `
       <div class="ex-item-header">
-        <span class="ex-name">${ex.name} <span class="muscle-tag" style="background: ${muscleColor}; color: #000;">${labelText}</span></span>
-        <button class="btn-ghost icon-btn" onclick="editExercise('${ex.id}')">✎</button>
+        <span class="ex-name">${escapeHTML(ex.name)} <span class="muscle-tag" style="background: ${muscleColor}; color: #000;">${escapeHTML(labelText)}</span></span>
+        <button class="btn-ghost icon-btn" data-edit-exercise="${ex.id}" aria-label="Edit ${escapeHTML(ex.name)}" onclick="editExercise('${ex.id}')">✎</button>
       </div>
       ${historyHtml}
     `;
@@ -723,48 +978,33 @@ let _libraryFilter = "All";
 function renderLibraryTabs() {
   const container = $("#libraryTabs");
   if (!container) return;
-  container.innerHTML = "";
-
-  // All tab
-  const allTab = document.createElement("button");
-  allTab.className = `picker-tab ${_libraryFilter === "All" ? "active" : ""}`;
-  allTab.textContent = "All";
-  allTab.onclick = () => { _libraryFilter = "All"; renderLibraryTabs(); renderExerciseLibrary(); };
-  container.appendChild(allTab);
-
-  // Muscle group tabs
-  MUSCLE_GROUPS.forEach(muscle => {
-    const tab = document.createElement("button");
-    tab.className = `picker-tab ${_libraryFilter === muscle ? "active" : ""}`;
-    tab.textContent = muscle;
-    const color = MUSCLE_COLORS[muscle] || "#ccc";
-    tab.style.borderColor = color;
-    if (_libraryFilter === muscle) {
-      tab.style.background = color;
-      tab.style.color = "#000"; // Always black text when active
-    }
-    tab.onclick = () => { _libraryFilter = muscle; renderLibraryTabs(); renderExerciseLibrary(); };
-    container.appendChild(tab);
-  });
-
-  // Cardio tab
-  const cardioTab = document.createElement("button");
-  cardioTab.className = `picker-tab ${_libraryFilter === "Cardio" ? "active" : ""}`;
-  cardioTab.textContent = "Cardio";
-  const cardioColor = MUSCLE_COLORS.Cardio;
-  cardioTab.style.borderColor = cardioColor;
-  if (_libraryFilter === "Cardio") {
-    cardioTab.style.background = cardioColor;
-    cardioTab.style.color = "#000";
+  const filters = ['All', ...MUSCLE_GROUPS, 'Cardio'];
+  if (container.children.length !== filters.length) {
+    container.replaceChildren();
+    filters.forEach(muscle => {
+      const tab = document.createElement('button'); tab.type = 'button'; tab.textContent = muscle;
+      tab.onclick = () => { _libraryFilter = muscle; renderExerciseLibrary(); };
+      container.appendChild(tab);
+    });
   }
-  cardioTab.onclick = () => { _libraryFilter = "Cardio"; renderLibraryTabs(); renderExerciseLibrary(); };
-  container.appendChild(cardioTab);
+  [...container.children].forEach((tab, index) => {
+    const muscle = filters[index], active = _libraryFilter === muscle, color = MUSCLE_COLORS[muscle];
+    tab.className = `picker-tab ${active ? 'active' : ''}`;
+    tab.setAttribute('aria-pressed', String(active));
+    tab.style.borderColor = color || '';
+    tab.style.background = active && color ? color : '';
+    tab.style.color = active && color ? '#000' : '';
+  });
 }
 
 // Library search listener
 $("#searchEx").addEventListener("input", renderExerciseLibrary);
 
-function openNewExerciseModal() {
+let _createdExerciseCallback = null;
+let _createdExerciseCancelCallback = null;
+function openNewExerciseModal(fromPicker = false) {
+  _createdExerciseCallback = fromPicker === true ? id => closeExercisePicker(id) : null;
+  _createdExerciseCancelCallback = fromPicker === true ? resumeExercisePicker : null;
   // Reset form for new exercise
   EDITING_EXERCISE_ID = null;
   $("#exModalTitle").textContent = "NEW EXERCISE";
@@ -775,32 +1015,23 @@ function openNewExerciseModal() {
   $("#newExInc").value = "2.5";
   $("#newExCardioMetric").value = "";
   $("#newExCardioGoal").value = "endurance";
-  $("#newExAssisted").checked = false;
-  $("#newExCompound").checked = false;
-  _selectedSecondaryMuscles = [];
+  $("#newExLoadType").value = 'external';
+  updateExerciseLoadHelp();
   $("#strengthOptions").classList.remove("hidden");
   $("#cardioOptions").classList.add("hidden");
   $("#muscleSelectWrapper").classList.remove("hidden");
-  $("#secondaryMusclesWrapper").classList.add("hidden");
   $("#btnDeleteEx").classList.add("hidden"); // Hide delete for new exercise
-  $("#addExModal").classList.remove("hidden");
-  document.body.style.overflow = "hidden";
+  showExerciseModal();
 }
 
 $("#btnShowAddEx").addEventListener("click", openNewExerciseModal);
 
-$("#btnCloseExModal").addEventListener("click", () => {
-  EDITING_EXERCISE_ID = null;
-  $("#addExModal").classList.add("hidden");
-  document.body.style.overflow = "";
-});
+$("#btnCloseExModal").addEventListener("click", closeExerciseModal);
 
 // Close exercise modal when clicking outside
 $("#addExModal").addEventListener("click", (e) => {
   if (e.target === $("#addExModal")) {
-    EDITING_EXERCISE_ID = null;
-    $("#addExModal").classList.add("hidden");
-    document.body.style.overflow = "";
+    closeExerciseModal();
   }
 });
 
@@ -817,49 +1048,120 @@ $("#newExType").addEventListener("change", (e) => {
 });
 
 let EDITING_EXERCISE_ID = null;
+let EXERCISE_RETURN_FOCUS = null;
+let EXERCISE_SAVING = false;
 
-$("#btnSaveEx").addEventListener("click", () => {
+function updateExerciseLoadHelp() {
+  const help = {
+    external: 'Log the weight you lift. Keep different variations as separate exercises.',
+    bodyweight: 'Reps only, for full-bodyweight movements such as dips or pull-ups. The estimate uses workout bodyweight.',
+    assisted: 'Enter machine assistance. The estimate is workout bodyweight minus assistance.',
+    weighted: 'Enter added weight. The estimate is workout bodyweight plus added weight.'
+  };
+  $("#exerciseLoadHelp").textContent = help[$("#newExLoadType").value] || help.external;
+}
+$("#newExLoadType").addEventListener('change', updateExerciseLoadHelp);
+
+function showExerciseModal() {
+  EXERCISE_RETURN_FOCUS = document.activeElement;
+  $("#addExModal").classList.remove("hidden");
+  LOGGER_SCROLL_LOCK.acquire("exercise-editor");
+  resetEditorScroll($("#addExModal .exercise-editor-body"));
+  $("#exModalTitle").focus({preventScroll: true});
+}
+function closeExerciseModal() {
+  if (EXERCISE_SAVING) return;
+  const onCancel = _createdExerciseCancelCallback;
+  EDITING_EXERCISE_ID = null; _createdExerciseCallback = null; _createdExerciseCancelCallback = null;
+  $("#addExModal").classList.add("hidden");
+  LOGGER_SCROLL_LOCK.release("exercise-editor");
+  const exerciseId = EXERCISE_RETURN_FOCUS?.dataset?.editExercise;
+  const returnTarget = EXERCISE_RETURN_FOCUS?.isConnected ? EXERCISE_RETURN_FOCUS
+    : exerciseId ? document.querySelector(`[data-edit-exercise="${exerciseId}"]`) || $("#btnShowAddEx") : null;
+  EXERCISE_RETURN_FOCUS = null;
+  if (onCancel) onCancel();
+  else returnTarget?.focus({preventScroll: true});
+}
+function setExerciseSaving(busy) {
+  EXERCISE_SAVING = busy;
+  $("#addExModal").querySelectorAll('button, input, select').forEach(node => { node.disabled = busy; });
+}
+$("#addExModal").addEventListener("keydown", event => {
+  if (event.key === 'Escape') { event.preventDefault(); closeExerciseModal(); return; }
+  if (event.key !== 'Tab') return;
+  const controls = [...$("#addExModal").querySelectorAll('button, input, select')]
+    .filter(node => !node.disabled && node.getClientRects().length);
+  if (!controls.length) { event.preventDefault(); return; }
+  const first = controls[0], last = controls[controls.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) {
+    event.preventDefault(); last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || !controls.includes(document.activeElement))) {
+    event.preventDefault(); first.focus();
+  }
+});
+
+$("#btnSaveEx").addEventListener("click", async () => {
+  if (EXERCISE_SAVING) return;
   const name = $("#newExName").value.trim();
-  if (!name) return;
+  if (!name) { $("#newExName").reportValidity(); $("#newExName").focus(); return; }
 
   const type = $("#newExType").value;
-  const isCompound = type === 'strength' ? $("#newExCompound").checked : false;
-
+  const existing = EDITING_EXERCISE_ID && DB.exercises[EDITING_EXERCISE_ID];
+  if (existing && type !== (existing.type || 'strength') && exerciseHasRecordedInputs(EDITING_EXERCISE_ID)) {
+    $("#newExType").value = existing.type || 'strength';
+    $("#newExType").dispatchEvent(new Event('change', {bubbles: true}));
+    $("#newExType").focus({preventScroll: true});
+    await askConfirm('Keep exercise type', 'This exercise has saved or unfinished sets. Create a separate exercise for a different type.');
+    return;
+  }
   const exerciseData = {
     name,
     type,
     muscle: type === 'cardio' ? null : $("#newExMuscle").value,
     equip: type === 'cardio' ? null : $("#newExEquip").value,
-    increment: type === 'cardio' ? null : (parseFloat($("#newExInc").value) || 2.5),
+    increment: type === 'cardio' ? null : (Number.isFinite(parseFloat($("#newExInc").value)) ? parseFloat($("#newExInc").value) : 2.5),
     cardioMetric: type === 'cardio' ? ($("#newExCardioMetric").value.trim() || 'km') : null,
     cardioGoal: type === 'cardio' ? $("#newExCardioGoal").value : null,
-    isAssisted: type === 'strength' ? $("#newExAssisted").checked : false,
-    isCompound: isCompound,
-    secondaryMuscles: isCompound ? _selectedSecondaryMuscles.slice() : []
+    ...(type === 'strength' ? {loadType: $("#newExLoadType").value} : {}),
+    ...(!EDITING_EXERCISE_ID ? {isAssisted: false} : {})
   };
 
+  let savedExerciseId = EDITING_EXERCISE_ID;
   if (EDITING_EXERCISE_ID) {
-    // Update existing exercise
+    // Only replace visible fields; retain imported/legacy exercise metadata.
     DB.exercises[EDITING_EXERCISE_ID] = { ...DB.exercises[EDITING_EXERCISE_ID], ...exerciseData };
   } else {
     // Create new exercise
     const id = uid();
     DB.exercises[id] = { id, ...exerciseData };
+    savedExerciseId = id;
   }
 
+  EDITING_EXERCISE_ID = savedExerciseId;
+  let saved = false;
+  setExerciseSaving(true);
+  try { saved = await saveDB(); } finally { setExerciseSaving(false); }
+  if (!saved) return;
   EDITING_EXERCISE_ID = null;
-  _selectedSecondaryMuscles = []; // Reset
-  saveDB();
-  $("#addExModal").classList.add("hidden");
-  document.body.style.overflow = "";
+  const callback = _createdExerciseCallback;
+  _createdExerciseCallback = null; _createdExerciseCancelCallback = null;
   renderExerciseLibrary();
+  closeExerciseModal();
+  callback?.(savedExerciseId);
 });
+
+function exerciseHasRecordedInputs(id) {
+  const sessions = [...(DB.sessions || []), ...(typeof ACTIVE_SESSION !== 'undefined' && ACTIVE_SESSION ? [ACTIVE_SESSION] : [])];
+  return sessions.some(session => (Array.isArray(session.entries?.[id]) && session.entries[id].length > 0)
+    || (Array.isArray(session.logDrafts?.[id]?.rows) && session.logDrafts[id].rows.length > 0));
+}
 
 function editExercise(id) {
   const ex = DB.exercises[id];
   if (!ex) return;
 
   EDITING_EXERCISE_ID = id;
+  _createdExerciseCallback = null; _createdExerciseCancelCallback = null;
   $("#exModalTitle").textContent = "EDIT EXERCISE";
 
   // Pre-populate form with existing data
@@ -867,14 +1169,11 @@ function editExercise(id) {
   $("#newExType").value = ex.type || 'strength';
   $("#newExMuscle").value = ex.muscle || '';
   $("#newExEquip").value = ex.equip || 'barbell';
-  $("#newExInc").value = ex.increment || 2.5;
+  $("#newExInc").value = ex.increment ?? 2.5;
   $("#newExCardioMetric").value = ex.cardioMetric || '';
   $("#newExCardioGoal").value = ex.cardioGoal || 'endurance';
-  $("#newExAssisted").checked = ex.isAssisted || false;
-  $("#newExCompound").checked = ex.isCompound || false;
-
-  // Load secondary muscles
-  _selectedSecondaryMuscles = ex.secondaryMuscles ? ex.secondaryMuscles.slice() : [];
+  $("#newExLoadType").value = LiftLogExerciseLoad.resolveMode(ex);
+  updateExerciseLoadHelp();
 
   // Show/hide options based on type
   if (ex.type === 'cardio') {
@@ -885,31 +1184,23 @@ function editExercise(id) {
     $("#strengthOptions").classList.remove("hidden");
     $("#cardioOptions").classList.add("hidden");
     $("#muscleSelectWrapper").classList.remove("hidden");
-
-    // Show/hide secondary muscles
-    if (ex.isCompound) {
-      $("#secondaryMusclesWrapper").classList.remove("hidden");
-      renderSecondaryMusclesList();
-    } else {
-      $("#secondaryMusclesWrapper").classList.add("hidden");
-    }
   }
 
   $("#btnDeleteEx").classList.remove("hidden"); // Show delete for existing exercise
-  $("#addExModal").classList.remove("hidden");
-  document.body.style.overflow = "hidden";
+  showExerciseModal();
 }
 
-$("#btnDeleteEx").addEventListener("click", () => {
-  if (!EDITING_EXERCISE_ID) return;
-  if (!confirm("Delete this exercise? This cannot be undone.")) return;
+$("#btnDeleteEx").addEventListener("click", async () => {
+  if (!EDITING_EXERCISE_ID || EXERCISE_SAVING) return;
+  if (!await askConfirm("Archive exercise?", "Hide it from the exercise library. Past workouts and routines keep their exercise details.")) return;
 
-  delete DB.exercises[EDITING_EXERCISE_ID];
-  EDITING_EXERCISE_ID = null;
-  saveDB();
-  $("#addExModal").classList.add("hidden");
-  document.body.style.overflow = "";
+  DB.exercises[EDITING_EXERCISE_ID].archived = true;
+  let saved = false;
+  setExerciseSaving(true);
+  try { saved = await saveDB(); } finally { setExerciseSaving(false); }
+  if (!saved) return;
   renderExerciseLibrary();
+  closeExerciseModal();
 });
 
 // --- WORKOUT LOGGING ---
@@ -928,14 +1219,15 @@ function renderWorkoutTab() {
 }
 
 function startTimer() {
-  if (WORKOUT_TIMER) return;
-  const start = new Date(ACTIVE_SESSION.start).getTime();
-  WORKOUT_TIMER = setInterval(() => {
-    const diff = Math.floor((Date.now() - start) / 1000);
+  if (WORKOUT_TIMER || !ACTIVE_SESSION) return;
+  const tick = () => {
+    if (!ACTIVE_SESSION) return;
+    const diff = Math.max(0, Math.floor((Date.now() - new Date(ACTIVE_SESSION.start).getTime()) / 1000));
     const m = Math.floor(diff / 60).toString().padStart(2, '0');
-    const s = (diff % 60).toString().padStart(2, '0');
-    $("#workoutTimer").textContent = `${m}:${s}`;
-  }, 1000);
+    const sec = (diff % 60).toString().padStart(2, '0');
+    $("#workoutTimer").textContent = `${m}:${sec}`;
+  };
+  tick(); WORKOUT_TIMER = setInterval(tick, 1000);
 }
 
 function stopTimer() {
@@ -945,196 +1237,198 @@ function stopTimer() {
 
 // Starting
 $("#btnStartEmpty").addEventListener("click", () => startWorkout());
-$("#btnStartTemplate").addEventListener("click", () => {
-  const tId = $("#templateSelect").value;
-  if (!tId) return alert("Select a routine");
-  startWorkout(DB.templates[tId]);
-});
 
-function startWorkout(template = null) {
-  if (ACTIVE_SESSION && !confirm("Overwrite current workout?")) return;
-
-  // Reset timer display immediately to prevent flash of old time
-  $("#workoutTimer").textContent = "00:00";
-
+async function startWorkout(template = null) {
+  if (!STORE_READY || STORAGE_ERROR || UPDATE_LOCK || FINISHING || STARTING) return;
+  if (ACTIVE_SESSION) {
+    $(".tab[data-tab='workout']").click();
+    showNotice("");
+    return;
+  }
+  STARTING = true;
+  try {
+  // Read once before starting so a second window cannot silently replace a draft.
+  await refreshSavedData();
+  if (ACTIVE_SESSION) { $(".tab[data-tab='workout']").click(); return; }
+  if (STORAGE_ERROR || UPDATE_LOCK) return;
+  stopTimer();
   ACTIVE_SESSION = {
-    id: uid(),
-    start: new Date().toISOString(),
-    entries: {}, // exId -> []
-    order: [], // list of exIds to maintain order
+    id: uid(), start: new Date().toISOString(), entries: {}, order: [],
+    notes: "", exerciseNotes: {}, logDrafts: {},
     templateName: template ? template.name : null,
     templateId: template ? template.id : null
   };
-
-  if (template) {
-    template.exercises.forEach(item => {
-      ACTIVE_SESSION.order.push(item.exId);
-    });
+  ACTIVE_SESSION.bodyweightSnapshot = LiftLogExerciseLoad.latestBodyweight(DB.bodyweight, ACTIVE_SESSION.start);
+  if (template) ACTIVE_SESSION.order = [...new Set(template.exercises.map(item => item.exId))].filter(id => DB.exercises[id]);
+  if (await saveDraft()) {
+    renderWorkoutTab(); showNotice("");
+    window.scrollTo({top: 0, left: 0, behavior: 'instant'});
   }
-
-  saveDB();
-  renderWorkoutTab();
+  } finally { STARTING = false; }
 }
 
-// Touch drag state
-let _touchDragIdx = null;
-let _touchDragElement = null;
-let _touchDragClone = null;
-let _touchOffsetX = 0;
-let _touchOffsetY = 0;
+// Active handle drag state: one pointer owns the gesture across mouse, pen and touch.
+let _activeDrag = null;
 
 function renderActiveSession() {
+  clearActiveDrag();
+  const progress = arguments[0]; // Supplied only after a successful set save, never ordinary navigation.
   const list = $("#activeExerciseList");
   list.innerHTML = "";
 
   // Load workout notes
   loadWorkoutNotes();
+  $("#activeRoutineName").textContent = ACTIVE_SESSION.templateName || 'Freestyle';
+  const completed = ACTIVE_SESSION.order.filter(id => LiftLogDates.completedSets(ACTIVE_SESSION.entries[id] || [], DB.exercises[id]).length > 0);
+  const motion = progress && LiftLogWorkoutMotion.completionTransition(ACTIVE_SESSION.order, progress.beforeCompleted, completed, progress.savedExercise);
+  $("#workoutProgress").textContent = `${completed.length} / ${ACTIVE_SESSION.order.length} logged`;
+  let connected = true;
 
   ACTIVE_SESSION.order.forEach((exId, idx) => {
     const ex = DB.exercises[exId];
     if (!ex) return;
     const sets = ACTIVE_SESSION.entries[exId] || [];
-    const isDone = sets.length > 0;
+    const isDone = completed.includes(exId);
+    const hasDraft = Boolean(ACTIVE_SESSION.logDrafts?.[exId]);
     const category = ex.type === 'cardio' ? 'Cardio' : (ex.muscle || 'Other');
 
     const div = document.createElement("div");
-    div.className = "neo-card bg-white mb-2 p-2 draggable-exercise";
-    div.draggable = true;
+    div.className = `neo-card bg-white mb-2 p-2 draggable-exercise workout-step ${isDone ? 'is-logged' : ''} ${connected && isDone ? 'rail-logged' : ''}`;
+    if (!isDone) connected = false;
+    div.draggable = false;
     div.dataset.idx = idx;
+    div.dataset.exerciseId = exId;
+    if (motion?.tick === exId) div.classList.add('progress-tick-enter');
+    const segment = motion?.segments.indexOf(exId) ?? -1;
+    if (segment >= 0) {
+      div.classList.add('progress-rail-enter');
+      div.style.setProperty('--rail-delay', `${Math.min(segment, 2) * 100}ms`);
+    }
+    if (motion?.next === exId) {
+      div.classList.add('progress-next-enter');
+      div.style.setProperty('--node-delay', `${360 + Math.min(motion.segments.length - 1, 2) * 100}ms`);
+    }
     div.innerHTML = `
-      <div class="row">
-        <div class="drag-handle">☰</div>
-        <strong class="flex-1">${ex.name} <span class="muscle-tag" style="background:${MUSCLE_COLORS[category]}">${category}</span></strong>
-        <button class="btn-ghost" onclick="openLogger('${exId}')">${isDone ? 'EDIT' : 'LOG'}</button>
-        <button class="btn-ghost text-red" onclick="removeExerciseFromSession('${exId}')" title="Remove">✕</button>
+      <span class="progress-node" aria-hidden="true"><span class="progress-tick">${isDone ? '✓' : ''}</span></span>
+      <div class="exercise-step-content">
+        <button class="exercise-open"><strong>${escapeHTML(ex.name)}</strong><span class="muscle-label"><i style="--muscle-color:${MUSCLE_COLORS[category] || '#999'}"></i>${escapeHTML(category)}</span><span class="muted small">${hasDraft ? 'In progress' : isDone ? `${LiftLogDates.completedSets(sets, ex).length} set${LiftLogDates.completedSets(sets, ex).length === 1 ? '' : 's'} logged` : 'Log sets'}</span></button>
+        <div class="exercise-step-actions"><button class="drag-handle btn-ghost" aria-label="Reorder ${escapeHTML(ex.name)}" title="Drag to reorder; use arrow keys with keyboard">☰</button><button class="exercise-remove btn-ghost text-red" aria-label="Remove ${escapeHTML(ex.name)}">✕</button></div>
       </div>
-      <div class="muted small">${sets.length} sets logged</div>
     `;
+    div.querySelector('.exercise-open').addEventListener('click', () => openLogger(exId));
+    div.querySelector('.exercise-remove').addEventListener('click', () => removeExerciseFromSession(exId));
 
     const handle = div.querySelector(".drag-handle");
-
-    // Desktop drag events
-    div.addEventListener("dragstart", (e) => {
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", idx);
-      div.classList.add("dragging");
+    handle.draggable = false;
+    handle.addEventListener('keydown', event => {
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+      event.preventDefault();
+      const to = idx + (event.key === 'ArrowUp' ? -1 : 1);
+      if (to < 0 || to >= ACTIVE_SESSION.order.length) return;
+      moveActiveExercise(idx, to);
+      $("#activeExerciseList").children[to]?.querySelector('.drag-handle').focus();
     });
 
-    div.addEventListener("dragend", () => {
-      div.classList.remove("dragging");
-      document.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
-    });
-
-    div.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      div.classList.add("drag-over");
-    });
-
-    div.addEventListener("dragleave", () => {
-      div.classList.remove("drag-over");
-    });
-
-    div.addEventListener("drop", (e) => {
-      e.preventDefault();
-      const fromIdx = parseInt(e.dataTransfer.getData("text/plain"));
-      const toIdx = parseInt(div.dataset.idx);
-      if (fromIdx !== toIdx) {
-        const [moved] = ACTIVE_SESSION.order.splice(fromIdx, 1);
-        ACTIVE_SESSION.order.splice(toIdx, 0, moved);
-        renderActiveSession();
-      }
-      div.classList.remove("drag-over");
-    });
-
-    // Touch drag events (for mobile)
-    handle.addEventListener("touchstart", (e) => {
-      e.preventDefault();
-      _touchDragIdx = idx;
-      _touchDragElement = div;
-      div.classList.add("dragging");
-
-      // Calculate offset from touch point to element's top-left
-      const rect = div.getBoundingClientRect();
-      const touch = e.touches[0];
-      _touchOffsetX = touch.clientX - rect.left;
-      _touchOffsetY = touch.clientY - rect.top;
-
-      // Create a visual clone that follows the finger
-      _touchDragClone = div.cloneNode(true);
-      _touchDragClone.classList.add("touch-drag-clone");
-      _touchDragClone.style.position = "fixed";
-      _touchDragClone.style.width = div.offsetWidth + "px";
-      _touchDragClone.style.zIndex = "1000";
-      _touchDragClone.style.pointerEvents = "none";
-      _touchDragClone.style.opacity = "0.8";
-      document.body.appendChild(_touchDragClone);
-
-      // Position clone at same visual position as original
-      _touchDragClone.style.left = rect.left + "px";
-      _touchDragClone.style.top = rect.top + "px";
-    }, { passive: false });
+    handle.addEventListener('pointerdown', event => startActivePointerDrag(event, idx, div, handle));
+    handle.addEventListener('lostpointercapture', cancelActivePointerDrag);
+    // Prevent native image/text dragging from competing with the owned handle gesture.
+    div.addEventListener('dragstart', event => event.preventDefault());
 
     list.appendChild(div);
   });
+  saveDraft();
 }
 
-// Global touch move and end handlers
-document.addEventListener("touchmove", (e) => {
-  if (_touchDragClone === null) return;
-
-  const touch = e.touches[0];
-  // Maintain the same offset from finger to element
-  _touchDragClone.style.left = (touch.clientX - _touchOffsetX) + "px";
-  _touchDragClone.style.top = (touch.clientY - _touchOffsetY) + "px";
-
-  // Find element under touch point
-  _touchDragClone.style.display = "none";
-  const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
-  _touchDragClone.style.display = "";
-
-  // Clear previous highlights
-  document.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
-
-  // Find the draggable parent
-  if (elementBelow) {
-    const dropTarget = elementBelow.closest(".draggable-exercise");
-    if (dropTarget && dropTarget !== _touchDragElement) {
-      dropTarget.classList.add("drag-over");
-    }
+function activeDragBlocked() {
+  return !ACTIVE_SESSION || COMMITTING || FINISHING || UPDATE_LOCK || STARTING || !STORE_READY || STORAGE_ERROR;
+}
+function activeDragUnchanged(drag) {
+  return !activeDragBlocked() && ACTIVE_SESSION.id === drag.sessionId && ACTIVE_SESSION.start === drag.sessionStart
+    && STORAGE_EPOCH === drag.epoch && JSON.stringify(ACTIVE_SESSION.order) === JSON.stringify(drag.order);
+}
+function startActivePointerDrag(event, index, element, handle) {
+  if (_activeDrag) { clearActiveDrag(); return; }
+  if (activeDragBlocked() || event.isPrimary === false || (event.pointerType === 'mouse' && event.button !== 0) || ACTIVE_SESSION.order.length < 2) return;
+  event.preventDefault();
+  const rect = element.getBoundingClientRect();
+  _activeDrag = {pointerId: event.pointerId, from: index, element, handle, clone: null, moved: false, target: null,
+    startX: event.clientX, startY: event.clientY, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top,
+    sessionId: ACTIVE_SESSION.id, sessionStart: ACTIVE_SESSION.start, epoch: STORAGE_EPOCH, order: ACTIVE_SESSION.order.slice()};
+  handle.setPointerCapture(event.pointerId);
+}
+function activeDragTarget(event) {
+  const drag = _activeDrag;
+  if (!drag) return;
+  document.querySelectorAll('.drag-over').forEach(node => node.classList.remove('drag-over'));
+  const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('.draggable-exercise');
+  const list = $('#activeExerciseList');
+  drag.target = target && target !== drag.element && target.parentElement === list ? target : null;
+  drag.target?.classList.add('drag-over');
+}
+function moveActivePointerDrag(event) {
+  const drag = _activeDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  if (!activeDragUnchanged(drag)) { clearActiveDrag(); return; }
+  if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
+  event.preventDefault();
+  if (!drag.moved) {
+    drag.moved = true; drag.element.classList.add('dragging');
+    const rect = drag.element.getBoundingClientRect();
+    drag.clone = drag.element.cloneNode(true); drag.clone.classList.add('touch-drag-clone');
+    drag.clone.setAttribute('aria-hidden', 'true'); drag.clone.inert = true;
+    Object.assign(drag.clone.style, {position: 'fixed', width: `${rect.width}px`, zIndex: '1000', pointerEvents: 'none'});
+    document.body.appendChild(drag.clone);
   }
-}, { passive: true });
-
-document.addEventListener("touchend", (e) => {
-  if (_touchDragClone === null) return;
-
-  // Find where we dropped
-  const touch = e.changedTouches[0];
-  _touchDragClone.style.display = "none";
-  const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
-
-  if (elementBelow) {
-    const dropTarget = elementBelow.closest(".draggable-exercise");
-    if (dropTarget && dropTarget !== _touchDragElement) {
-      const toIdx = parseInt(dropTarget.dataset.idx);
-      const fromIdx = _touchDragIdx;
-      if (fromIdx !== toIdx) {
-        const [moved] = ACTIVE_SESSION.order.splice(fromIdx, 1);
-        ACTIVE_SESSION.order.splice(toIdx, 0, moved);
-        renderActiveSession();
-      }
-    }
+  drag.clone.style.left = `${event.clientX - drag.offsetX}px`;
+  drag.clone.style.top = `${event.clientY - drag.offsetY}px`;
+  // Keep a longer workout reachable while the owned handle approaches the viewport edge.
+  if (event.clientY < 100) window.scrollBy?.({top: -14, behavior: 'instant'});
+  else if (event.clientY > window.innerHeight - 50) window.scrollBy?.({top: 14, behavior: 'instant'});
+  activeDragTarget(event);
+}
+function endActivePointerDrag(event) {
+  const drag = _activeDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  if (drag.moved) activeDragTarget(event);
+  const target = drag.target, to = target ? Number(target.dataset.idx) : null;
+  const commit = drag.moved && target && activeDragUnchanged(drag);
+  clearActiveDrag();
+  if (commit) {
+    moveActiveExercise(drag.from, to);
+    $('#activeExerciseList').children[to]?.querySelector('.drag-handle').focus({preventScroll: true});
   }
+}
+function cancelActivePointerDrag(event) {
+  if (_activeDrag && (!event || event.pointerId === _activeDrag.pointerId)) clearActiveDrag();
+}
 
-  // Cleanup
-  if (_touchDragElement) _touchDragElement.classList.remove("dragging");
-  if (_touchDragClone) _touchDragClone.remove();
-  document.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+function moveActiveExercise(from, to) {
+  if (COMMITTING || FINISHING || UPDATE_LOCK || STARTING || !STORE_READY || STORAGE_ERROR) return;
+  if (!ACTIVE_SESSION || !Number.isInteger(from) || !Number.isInteger(to) || from === to || from < 0 || to < 0 || from >= ACTIVE_SESSION.order.length || to >= ACTIVE_SESSION.order.length) return;
+  const [moved] = ACTIVE_SESSION.order.splice(from, 1);
+  ACTIVE_SESSION.order.splice(to, 0, moved);
+  renderActiveSession();
+}
 
-  _touchDragIdx = null;
-  _touchDragElement = null;
-  _touchDragClone = null;
-});
+// Global pointer handlers continue an owned drag outside its handle without a second engine.
+document.addEventListener('pointerdown', event => {
+  if (_activeDrag && event.pointerId !== _activeDrag.pointerId) clearActiveDrag();
+}, {passive: true});
+document.addEventListener('pointermove', moveActivePointerDrag, {passive: false});
+document.addEventListener('pointerup', endActivePointerDrag);
+document.addEventListener('pointercancel', cancelActivePointerDrag);
+document.addEventListener('visibilitychange', () => { if (document.hidden) clearActiveDrag(); });
+
+function clearActiveDrag() {
+  const drag = _activeDrag;
+  _activeDrag = null;
+  if (!drag) return;
+  drag.element.classList.remove('dragging'); drag.clone?.remove();
+  document.querySelectorAll('.drag-over').forEach(node => node.classList.remove('drag-over'));
+  if (drag.handle.hasPointerCapture?.(drag.pointerId)) drag.handle.releasePointerCapture(drag.pointerId);
+}
+window.addEventListener('blur', clearActiveDrag);
+window.addEventListener('resize', clearActiveDrag);
 
 $("#btnAddExToWorkout").addEventListener("click", () => {
   openExercisePicker((exId) => {
@@ -1145,458 +1439,822 @@ $("#btnAddExToWorkout").addEventListener("click", () => {
   });
 });
 
-$("#btnFinishWorkout").addEventListener("click", () => {
-  // Check if any exercises were logged
-  const hasEntries = Object.values(ACTIVE_SESSION.entries).some(sets => sets && sets.length > 0);
-
-  if (!hasEntries) {
-    if (confirm("No exercises logged. Discard this workout?")) {
-      ACTIVE_SESSION = null;
-      renderWorkoutTab();
+$("#btnFinishWorkout").addEventListener("click", async () => {
+  if (!ACTIVE_SESSION || FINISHING || UPDATE_LOCK) return;
+  FINISHING = true;
+  clearActiveDrag();
+  try {
+    const unfinished = Object.entries(ACTIVE_SESSION.logDrafts || {}).find(([exId]) =>
+      LiftLogLogging.hasExerciseWork(ACTIVE_SESSION, exId));
+    if (unfinished) {
+      showNotice("Review your unfinished exercise edits and save the sets before finishing.");
+      openLogger(unfinished[0]); return;
     }
-    return;
-  }
-
-  if (!confirm("Finish and save workout?")) return;
-  ACTIVE_SESSION.end = new Date().toISOString();
-  DB.sessions.unshift(ACTIVE_SESSION);
-  ACTIVE_SESSION = null;
-  saveDB();
-  renderWorkoutTab();
-  // Go to history
-  $(".tab[data-tab='history']").click();
+    if (!await flushSaves()) return;
+    const hasEntries = LiftLogDates.completedExerciseIds(ACTIVE_SESSION, DB.exercises).length > 0;
+    if (!await askConfirm(hasEntries ? "Finish workout?" : "Discard empty workout?", hasEntries ?
+      "Your logged sets and notes will be saved to History." : "No sets have been logged. Discard this unfinished workout?")) return;
+    COMMITTING = true; updateSaveStatus();
+    if (!await flushSaves()) return;
+    if (!hasEntries) {
+      const previous = ACTIVE_SESSION;
+      ACTIVE_SESSION = null;
+      if (!await saveDraft()) { ACTIVE_SESSION = previous; return; }
+    } else {
+      const expectedDraft = copyState(ACTIVE_SESSION);
+      const completed = copyState(expectedDraft);
+      completed.end = new Date().toISOString(); delete completed.logDrafts;
+      const result = await STORE.finishWorkout(completed, expectedDraft, {epoch: STORAGE_EPOCH});
+      applySnapshot(result);
+    }
+    stopTimer(); renderWorkoutTab();
+    showNotice(hasEntries ? "Workout saved." : "Empty workout discarded.");
+    $(".tab[data-tab='history']").click();
+  } catch (error) { storageFailure(error); }
+  finally { FINISHING = false; COMMITTING = false; updateSaveStatus(); LiftLogUpdates.notifySafe(); }
 });
 
 // --- LOGGING MODAL ---
 let CURRENT_LOG_EX = null;
+let LOGGER_RETURN_FOCUS = null;
+let CURRENT_LOG_UNIT = "kg";
+let CURRENT_LOG_MODE = 'external';
+let LOG_SAVING = false;
+let LOG_SWAPPING = false;
+let REMOVING_EXERCISE = false;
+const LOGGER_SCROLL_LOCK = LiftLogLogging.createScrollLock(window, document);
 
-function removeExerciseFromSession(exId) {
+async function removeExerciseFromSession(exId) {
+  const blocked = () => LOG_SAVING || COMMITTING || FINISHING || UPDATE_LOCK || STARTING || !STORE_READY || STORAGE_ERROR || CURRENT_LOG_EX;
+  if (!ACTIVE_SESSION || REMOVING_EXERCISE || blocked() || !ACTIVE_SESSION.order.includes(exId)) return;
+  const expected = copyState(ACTIVE_SESSION), expectedEpoch = STORAGE_EPOCH;
   const ex = DB.exercises[exId];
-  const sets = ACTIVE_SESSION.entries[exId] || [];
-
-  // Confirm if there are logged sets
-  if (sets.length > 0) {
-    if (!confirm(`Remove "${ex?.name || 'exercise'}" and its ${sets.length} logged sets?`)) return;
-  }
-
-  // Remove from order and entries
-  ACTIVE_SESSION.order = ACTIVE_SESSION.order.filter(id => id !== exId);
-  delete ACTIVE_SESSION.entries[exId];
-  renderActiveSession();
-}
-
-function openLogger(exId) {
-  CURRENT_LOG_EX = exId;
-  const ex = DB.exercises[exId];
-  $("#logModalTitle").textContent = ex.name;
-
-  // Headers based on type and unit setting
-  const headers = $("#logHeaders");
-  const weightLabel = getWeightLabel();
-  if (ex.type === 'cardio') {
-    headers.querySelector(".h-val-1").textContent = "MINS";
-    headers.querySelector(".h-val-2").textContent = (ex.cardioMetric || 'KM').toUpperCase();
-  } else if (ex.isAssisted) {
-    headers.querySelector(".h-val-1").textContent = "ASSIST";
-    headers.querySelector(".h-val-2").textContent = "REPS";
-  } else {
-    headers.querySelector(".h-val-1").textContent = weightLabel;
-    headers.querySelector(".h-val-2").textContent = "REPS";
-  }
-
-  const container = $("#logRows");
-  container.innerHTML = "";
-
-  // Get existing logs OR Auto-fill from history
-  const currentLogs = ACTIVE_SESSION.entries[exId] || [];
-
-  if (currentLogs.length === 0) {
-    // Attempt Auto-fill
-    const lastSession = findLastSessionWithExercise(exId);
-    if (lastSession && ex.type !== 'cardio') {
-      // Calculate smart suggestion
-      const bestSet = lastSession.sets.reduce((best, s) => {
-        const w = parseFloat(s.w || 0);
-        const r = parseInt(s.r || 0);
-        if (w > best.w || (w === best.w && r > best.r)) return { w, r };
-        return best;
-      }, { w: 0, r: 0 });
-
-      const increment = ex.increment || 2.5;
-      const unit = getWeightUnit();
-      // Convert weights to display units
-      const displayBestW = convertWeight(bestSet.w);
-      const displayLowerW = displayBestW;
-      const displayHigherW = convertWeight(bestSet.w + increment);
-
-      // Adjust rep targets based on training goal
-      const goal = DB.user.trainingGoal || "hypertrophy";
-      const targetReps = goal === "strength" ? { low: 3, mid: 5, high: 8 } : { low: 8, mid: 10, high: 12 };
-
-      // Suggestion: same weight = more reps, more weight = same/fewer reps
-      let suggestion = "";
-      if (DB.user.showSuggestions !== false) {
-        if (bestSet.r >= targetReps.high) {
-          suggestion = `<strong>Try: ${displayHigherW}${unit} for ${targetReps.low}-${targetReps.mid} reps</strong> (time to increase!)`;
-        } else if (bestSet.r >= targetReps.mid) {
-          suggestion = `<strong>Try: ${displayLowerW}-${displayHigherW}${unit} for ${bestSet.r}-${bestSet.r + 2} reps</strong>`;
-        } else {
-          suggestion = `<strong>Try: ${displayLowerW}${unit} for ${bestSet.r + 1}-${bestSet.r + 3} reps</strong> (build reps first)`;
+  let ownsCommitLock = false;
+  REMOVING_EXERCISE = true;
+  try {
+    clearActiveDrag();
+    if (!await askConfirm("Remove exercise?", `Remove ${ex?.name || 'this exercise'} and its saved sets and unfinished edits from this workout?`)) return;
+    // A save may replace the draft object while the dialog is open. Compare its
+    // contents and generation, not the object reference, before deleting anything.
+    if (blocked()) return;
+    if (STORAGE_EPOCH !== expectedEpoch || !LiftLogStorage.equal(ACTIVE_SESSION, expected)) {
+      showNotice('This workout changed. Review it before removing the exercise.');
+      return;
+    }
+    COMMITTING = true; ownsCommitLock = true; updateSaveStatus();
+    const session = ACTIVE_SESSION;
+    session.order = session.order.filter(id => id !== exId);
+    delete session.entries[exId];
+    if (session.logDrafts) delete session.logDrafts[exId];
+    if (session.exerciseNotes) delete session.exerciseNotes[exId];
+    const removedOrder = session.order.slice();
+    let saved = false;
+    try { saved = await saveDraft(); }
+    catch (error) { storageFailure(error); }
+    if (!saved) {
+      if (STORAGE_EPOCH === expectedEpoch && ACTIVE_SESSION?.id === expected.id && ACTIVE_SESSION.start === expected.start) {
+        // Restore only the removed exercise; never overwrite a replacement
+        // session or unrelated edits if an asynchronous operation changed it.
+        const current = ACTIVE_SESSION;
+        if (LiftLogStorage.equal(current.order, removedOrder)) current.order = expected.order.slice();
+        else if (!current.order.includes(exId)) current.order.splice(Math.min(expected.order.indexOf(exId), current.order.length), 0, exId);
+        for (const field of ['entries', 'logDrafts', 'exerciseNotes']) {
+          if (Object.hasOwn(expected[field] || {}, exId) && !Object.hasOwn(current[field] || {}, exId)) {
+            current[field] ||= {};
+            current[field][exId] = copyState(expected[field][exId]);
+          }
         }
       }
-
-      const dateStr = new Date(lastSession.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-      $("#prevSessionInfo").innerHTML = `
-        <div class="muted small">Last: ${dateStr} — Best set: ${displayBestW}${unit} × ${bestSet.r}</div>
-        ${DB.user.showSuggestions !== false ? `<div class="suggestion">${suggestion}</div>` : ''}
-      `;
-
-      // Add rows for each set done last time
-      lastSession.sets.forEach(s => addLogRow(ex, s, true));
-    } else if (lastSession) {
-      // Cardio - just show last time
-      $("#prevSessionInfo").innerHTML = `<span class="muted small">Last: ${new Date(lastSession.date).toLocaleDateString()} (${lastSession.sets.length} sets)</span>`;
-      lastSession.sets.forEach(s => addLogRow(ex, s, true));
-    } else {
-      // Show assisted info if applicable
-      const bw = getLatestBodyweight();
-      if (ex.isAssisted && bw) {
-        $("#prevSessionInfo").innerHTML = `<span class="muted small">Your bodyweight: ${bw}kg. Log assistance and we'll calculate effective weight.</span>`;
-      } else {
-        $("#prevSessionInfo").innerHTML = '<span class="muted small">No history - this is your first time!</span>';
-      }
-      addLogRow(ex);
+      return;
     }
-  } else {
-    $("#prevSessionInfo").innerHTML = '<span class="muted small">Editing current session</span>';
-    currentLogs.forEach(s => addLogRow(ex, s, false));
+    if (ACTIVE_SESSION?.id === expected.id && ACTIVE_SESSION.start === expected.start && STORAGE_EPOCH === expectedEpoch) renderActiveSession();
+  } finally {
+    REMOVING_EXERCISE = false;
+    if (ownsCommitLock) { COMMITTING = false; updateSaveStatus(); LiftLogUpdates.notifySafe(); }
   }
-  
-  $("#logModal").classList.remove("hidden");
-  document.body.style.overflow = "hidden";
 }
 
-function addLogRow(ex, data = null, isGhost = false, prevWeight = null) {
+function loggerRows() {
+  return Array.from($$("#logRows .log-row"), row => ({
+    ...row._sourceRow,
+    a: row.querySelector(".input-val-1").value,
+    b: row.querySelector(".input-val-2").value
+  }));
+}
+
+function loggerExercise() {
+  const exercise = DB.exercises[CURRENT_LOG_EX];
+  return exercise?.type === 'cardio' ? exercise : {...exercise, loadType: CURRENT_LOG_MODE};
+}
+function setupWorkoutBodyweight() {
+  const relevant = DB.exercises[CURRENT_LOG_EX]?.type !== 'cardio' && CURRENT_LOG_MODE !== 'external';
+  $("#logBodyweight").hidden = !relevant;
+  if (!relevant) return;
+  if (!Object.hasOwn(ACTIVE_SESSION, 'bodyweightSnapshot')) {
+    ACTIVE_SESSION.bodyweightSnapshot = LiftLogExerciseLoad.latestBodyweight(DB.bodyweight, ACTIVE_SESSION.start);
+  }
+  if (!ACTIVE_SESSION.bodyweightInput || !['kg', 'lbs'].includes(ACTIVE_SESSION.bodyweightInput.unit)) {
+    const snapshot = ACTIVE_SESSION.bodyweightSnapshot;
+    const display = snapshot ? String(LiftLogLogging.displayWeight(snapshot.kg, CURRENT_LOG_UNIT)) : '';
+    ACTIVE_SESSION.bodyweightInput = {value: display, unit: CURRENT_LOG_UNIT};
+    if (snapshot) Object.assign(ACTIVE_SESSION.bodyweightInput, {originalKg: snapshot.kg, originalDisplay: display,
+      originalDate: snapshot.date, ...(snapshot.sourceId ? {originalSourceId: snapshot.sourceId} : {})});
+  }
+  $("#logBodyweightInput").value = ACTIVE_SESSION.bodyweightInput.value;
+  $("#logBodyweightUnit").textContent = `(${ACTIVE_SESSION.bodyweightInput.unit})`;
+  updateWorkoutBodyweightDate();
+}
+function updateWorkoutBodyweightDate() {
+  const source = ACTIVE_SESSION?.bodyweightSnapshot?.date;
+  const calendarDay = typeof source === 'string' ? LiftLogDates.parseLocalDay(source.slice(0, 10)) : new Date(NaN);
+  const date = typeof source === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(source)
+    ? calendarDay : new Date(source);
+  const valid = typeof source === 'string' && Number.isFinite(calendarDay.getTime()) && Number.isFinite(date.getTime());
+  const label = $("#logBodyweightDate");
+  label.hidden = !valid;
+  label.textContent = valid ? date.toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'}) : '';
+  label.dateTime = valid ? source : '';
+}
+$("#logBodyweightInput").addEventListener('input', () => {
+  if (!ACTIVE_SESSION || LOG_SAVING || !CURRENT_LOG_EX) return;
+  const input = ACTIVE_SESSION.bodyweightInput || {unit: CURRENT_LOG_UNIT};
+  input.value = $("#logBodyweightInput").value;
+  ACTIVE_SESSION.bodyweightInput = input;
+  ACTIVE_SESSION.bodyweightSnapshot = LiftLogLogging.parseBodyweightInput(input, ACTIVE_SESSION.start);
+  updateWorkoutBodyweightDate();
+  captureLogDraft();
+});
+
+function captureLogDraft() {
+  if (!ACTIVE_SESSION || !CURRENT_LOG_EX || LOG_SAVING) return Promise.resolve(false);
+  ACTIVE_SESSION.logDrafts ||= {};
+  const draft = {
+    rows: loggerRows(), notes: $("#logNotes").value, unit: CURRENT_LOG_UNIT, loadType: CURRENT_LOG_MODE
+  };
+  const sameSaved = LiftLogLogging.unchangedDraft(loggerExercise(), draft,
+    ACTIVE_SESSION.entries[CURRENT_LOG_EX] || [], ACTIVE_SESSION.exerciseNotes?.[CURRENT_LOG_EX] || '');
+  if (sameSaved) delete ACTIVE_SESSION.logDrafts[CURRENT_LOG_EX];
+  else ACTIVE_SESSION.logDrafts[CURRENT_LOG_EX] = draft;
+  const error = $("#logError");
+  if (error) error.textContent = "";
+  return saveDraft();
+}
+
+function openLogger(exId, {preserveScroll = false, preserveLauncher = false} = {}) {
+  if (!ACTIVE_SESSION || !DB.exercises[exId] || LOG_SAVING) return;
+  if (!preserveLauncher && !CURRENT_LOG_EX) LOGGER_RETURN_FOCUS = document.activeElement;
+  const scrollTop = $("#logModal .drawer-body").scrollTop;
+  CURRENT_LOG_EX = exId;
+  const draft = ACTIVE_SESSION.logDrafts?.[exId];
+  CURRENT_LOG_MODE = LiftLogExerciseLoad.MODES.includes(draft?.loadType) ? draft.loadType
+    : draft ? LiftLogExerciseLoad.resolveSetMode({}, DB.exercises[exId]) : LiftLogExerciseLoad.resolveMode(DB.exercises[exId]);
+  const ex = loggerExercise();
+  CURRENT_LOG_UNIT = draft && ["kg", "lbs"].includes(draft.unit) ? draft.unit : getWeightUnit();
+  setupWorkoutBodyweight();
+  $("#logModalTitle").textContent = ex.name;
+  const category = ex.type === 'cardio' ? 'Cardio' : ex.muscle || 'Other';
+  $("#logModal").style.setProperty('--logger-muscle', MUSCLE_COLORS[category] || MUSCLE_COLORS.Other);
+  const headers = $("#logHeaders");
+  headers.querySelector(".h-val-1").textContent = ex.type === 'cardio'
+    ? "MINS" : `${LiftLogExerciseLoad.rawLabel(CURRENT_LOG_MODE).toUpperCase()} (${CURRENT_LOG_UNIT.toUpperCase()})`;
+  headers.querySelector(".h-val-2").textContent = ex.type === 'cardio'
+    ? (ex.cardioMetric || 'km').toUpperCase() : "REPS";
+
+  const history = $("#prevSessionInfo");
+  history.innerHTML = "";
+  history.hidden = true;
+  $("#loggerCopySlot").innerHTML = "";
+  const last = LiftLogLogging.findLast(exId, ex, DB.sessions, ACTIVE_SESSION);
+  if (last) {
+    const dateText = new Date(last.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    const routine = last.session.templateName || (last.session.templateId ? 'another routine' : 'Freestyle');
+    const context = last.sameRoutine
+      ? (ACTIVE_SESSION.templateId || ACTIVE_SESSION.templateName ? 'Last in this routine' : 'Last freestyle workout')
+      : `Last in ${routine}`;
+    const performance = LiftLogLogging.rowsFromSets(ex, last.sets, CURRENT_LOG_UNIT).map((row, index) =>
+      ex.type === 'cardio'
+        ? `<span class="logger-previous-set" aria-label="Set ${index + 1}">${escapeHTML(row.a)} min · ${escapeHTML(row.b)} ${escapeHTML(ex.cardioMetric || 'km')}</span>`
+        : `<span class="logger-previous-set" aria-label="Set ${index + 1}">${escapeHTML(LiftLogLogging.formatStrengthSet(row.originalSet, ex, CURRENT_LOG_UNIT))}</span>`
+    ).join("");
+    history.hidden = false;
+    history.innerHTML = `<details class="logger-history-details" open><summary><span><strong>${escapeHTML(context)}</strong><time datetime="${escapeHTML(last.date)}">${escapeHTML(dateText)}</time></span><span class="logger-history-chevron" aria-hidden="true"><span class="logger-symbol logger-symbol-caret"></span></span></summary><div class="logger-previous-sets">${performance}</div></details>`;
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'logger-icon-button logger-copy-last';
+    copy.id = 'btnCopyLastSets';
+    const copyLabel = ex.type === 'cardio' ? 'Copy last time, distance and set count' : 'Copy last weights and set count';
+    copy.setAttribute('aria-label', copyLabel); copy.title = copyLabel;
+    copy.innerHTML = '<span class="logger-copy-artwork" aria-hidden="true"><img src="assets/icons/copy-original.jpg" alt=""></span>';
+    copy.addEventListener('click', async () => {
+      if (LOG_SAVING || !ACTIVE_SESSION || CURRENT_LOG_EX !== exId) return;
+      const sessionId = ACTIVE_SESSION.id;
+      if (loggerRows().some(row => row.a.trim() || row.b.trim())) {
+        const message = ex.type === 'cardio' ? 'Copy the previous time, distance and set count? Your exercise notes will stay.'
+          : 'Copy the previous weights and set count? Reps will start blank. Your exercise notes will stay.';
+        if (!await askConfirm('Replace these inputs?', message)) return;
+      }
+      if (LOG_SAVING || ACTIVE_SESSION?.id !== sessionId || CURRENT_LOG_EX !== exId) return;
+      $("#logRows").innerHTML = "";
+      LiftLogLogging.rowsForCopy(ex, last.sets, CURRENT_LOG_UNIT).forEach(row => addLogRow(ex, row));
+      if (!await captureLogDraft()) $("#logError").textContent = 'These inputs could not be saved. Keep this workout open and try again.';
+    });
+    $("#loggerCopySlot").appendChild(copy);
+  }
+  if (ex.type !== 'cardio' && CURRENT_LOG_UNIT !== getWeightUnit()) {
+    const unitNote = document.createElement('p');
+    unitNote.className = 'small';
+    unitNote.textContent = `Your unfinished inputs are still in ${CURRENT_LOG_UNIT.toUpperCase()}.`;
+    history.hidden = false;
+    history.appendChild(unitNote);
+  }
+
+  $("#logRows").innerHTML = "";
+  const currentSets = ACTIVE_SESSION.entries[exId] || [];
+  if (draft && Array.isArray(draft.rows)) {
+    draft.rows.forEach(row => addLogRow(ex, row));
+  } else if (currentSets.length) {
+    LiftLogLogging.rowsFromSets(ex, currentSets, CURRENT_LOG_UNIT).forEach(row => addLogRow(ex, row));
+  } else {
+    const templateItem = DB.templates[ACTIVE_SESSION.templateId]?.exercises?.find(item => item.exId === exId);
+    const rowCount = Math.min(20, Math.max(1, Number.parseInt(templateItem?.sets, 10) || 1));
+    for (let i = 0; i < rowCount; i++) addLogRow(ex);
+  }
+  $("#logNotes").value = draft ? draft.notes || '' : ACTIVE_SESSION.exerciseNotes?.[exId] || '';
+  $("#logNotes").setAttribute('aria-label', 'Exercise notes');
+  if (!$("#logError")) {
+    const error = document.createElement('p');
+    error.id = 'logError';
+    error.className = 'text-red small';
+    error.setAttribute('role', 'alert');
+    $("#logRows").after(error);
+  }
+  $("#logError").textContent = '';
+  LOGGER_SCROLL_LOCK.acquire('logger');
+  $("#logModal").classList.remove("hidden");
+  resetEditorScroll($("#logModal .drawer-body"));
+  if (preserveScroll) $("#logModal .drawer-body").scrollTop = scrollTop;
+  focusModalTitle($("#logModalTitle"));
+  updateSaveStatus();
+  captureLogDraft();
+}
+
+function addLogRow(ex, data = null) {
   const row = document.createElement("div");
   row.className = "log-row";
-
-  const val1 = data ? (ex.type==='cardio' ? data.time : data.w) : "";
-  const val2 = data ? (ex.type==='cardio' ? data.dist : data.r) : "";
-
-  // Suggestion logic (Weight Increment)
-  let placeholder1 = "";
-  let placeholder2 = "";
-
-  if (isGhost && data) {
-    // If auto-filling from history, apply suggestion logic
-    if (ex.type !== 'cardio') {
-       let w = parseFloat(data.w);
-       let r = parseInt(data.r);
-       if (r >= 12) w += (ex.increment || 2.5); // Logic: hit max reps, inc weight
-       placeholder1 = w;
-       placeholder2 = r; // Maintain rep target
-    } else {
-        placeholder1 = data.time;
-        placeholder2 = data.dist;
-    }
-  } else if (prevWeight) {
-    // Auto-fill weight from previous set in current session
-    placeholder1 = prevWeight;
+  row._sourceRow = {...data};
+  if (ex.type !== 'cardio' && !data?.originalSet) row._sourceRow.loadType = data?.loadType || CURRENT_LOG_MODE;
+  if (data?.originalSet) row._sourceRow.originalSet = { ...data.originalSet };
+  if (data?.originalKg !== undefined) {
+    row._sourceRow.originalKg = data.originalKg;
+    row._sourceRow.originalDisplay = data.originalDisplay;
   }
-
-  let valueStr1, valueStr2;
-  let ghostClass = '';
-
-  if (data && !isGhost) {
-    // Editing existing data
-    valueStr1 = `value="${val1}"`;
-    valueStr2 = `value="${val2}"`;
-  } else if (placeholder1 || placeholder2) {
-    // Show as placeholder (ghost)
-    valueStr1 = placeholder1 ? `placeholder="${placeholder1}"` : '';
-    valueStr2 = placeholder2 ? `placeholder="${placeholder2}"` : '';
-    ghostClass = 'ghost-val';
-  } else {
-    valueStr1 = '';
-    valueStr2 = '';
-  }
-
   row.innerHTML = `
-    <div class="text-center font-bold index-num">#</div>
-    <input class="neo-input input-val-1 ${ghostClass}" type="text" inputmode="decimal" ${valueStr1}>
-    <input class="neo-input input-val-2 ${ghostClass}" type="text" inputmode="numeric" ${valueStr2}>
-    <button class="btn-ghost text-red remove-row">✕</button>
+    <div class="log-set-heading"><strong>SET <span class="index-num">#</span></strong><button class="btn-ghost text-red remove-row" type="button"><span class="logger-symbol logger-symbol-close" aria-hidden="true"></span></button></div>
+    <label class="log-field log-field-first"><span class="log-field-name h-val-1"></span><input class="neo-input input-val-1" type="text" inputmode="decimal" autocomplete="off"></label>
+    <label class="log-field log-field-second"><span class="log-field-name h-val-2"></span><input class="neo-input input-val-2" type="text" inputmode="${ex.type === 'cardio' ? 'decimal' : 'numeric'}" autocomplete="off"></label>
   `;
-
-  // Remove ghost class on input and filter non-numeric
-  const val1Input = row.querySelector(".input-val-1");
-  const val2Input = row.querySelector(".input-val-2");
-
-  val1Input.addEventListener("input", (e) => {
-    val1Input.classList.remove("ghost-val");
-    // Allow only digits and one decimal point for weight
-    let val = e.target.value;
-    // Remove anything that's not a digit or decimal
-    val = val.replace(/[^0-9.]/g, '');
-    // Ensure only one decimal point
-    const parts = val.split('.');
-    if (parts.length > 2) {
-      val = parts[0] + '.' + parts.slice(1).join('');
-    }
-    e.target.value = val;
-  });
-
-  val2Input.addEventListener("input", (e) => {
-    val2Input.classList.remove("ghost-val");
-    // Only digits for reps/distance
-    e.target.value = e.target.value.replace(/[^0-9]/g, '');
-  });
-
-  row.querySelector(".remove-row").addEventListener("click", () => {
+  const first = row.querySelector('.input-val-1');
+  const second = row.querySelector('.input-val-2');
+  first.value = data?.a ?? '';
+  second.value = data?.b ?? '';
+  const mode = data?.originalSet ? LiftLogExerciseLoad.resolveSetMode(data.originalSet, ex) : row._sourceRow.loadType;
+  row.dataset.loadType = ex.type === 'cardio' ? 'cardio' : mode;
+  first.hidden = mode === 'bodyweight' && ex.type !== 'cardio';
+  row.querySelector('.log-field-first').hidden = first.hidden;
+  if (first.hidden) first.value = '';
+  first.addEventListener('input', captureLogDraft);
+  second.addEventListener('input', captureLogDraft);
+  row.querySelector('.remove-row').addEventListener('click', () => {
+    if (LOG_SAVING) return;
     row.remove();
-    renumberRows(); // Renumber remaining rows after deletion
+    renumberRows();
+    captureLogDraft();
   });
   $("#logRows").appendChild(row);
   renumberRows();
 }
 
 function renumberRows() {
-  $$("#logRows .index-num").forEach((el, i) => el.textContent = i + 1);
+  const ex = DB.exercises[CURRENT_LOG_EX];
+  const rows = Array.from($$("#logRows .log-row"));
+  const modes = new Set(rows.map(row => row.dataset.loadType));
+  const repsOnly = ex.type !== 'cardio' && modes.size === 1 && modes.has('bodyweight');
+  $("#logHeaders").classList.toggle('log-reps-only', repsOnly);
+  $("#logHeaders").querySelector('.h-val-1').hidden = repsOnly;
+  $("#logHeaders").querySelector('.h-val-1').textContent = ex.type === 'cardio' ? 'MINS'
+    : `${modes.size > 1 ? 'LOAD' : LiftLogExerciseLoad.rawLabel(rows[0]?.dataset.loadType || CURRENT_LOG_MODE).toUpperCase()} (${CURRENT_LOG_UNIT.toUpperCase()})`;
+  rows.forEach((row, index) => {
+    row.querySelector('.index-num').textContent = index + 1;
+    const firstLabel = ex.type === 'cardio' ? 'Minutes' : `${LiftLogExerciseLoad.rawLabel(row.dataset.loadType)} in ${CURRENT_LOG_UNIT}`;
+    const secondLabel = ex.type === 'cardio' ? `Distance in ${ex.cardioMetric || 'km'}` : 'Repetitions';
+    row.querySelector('.input-val-1').setAttribute('aria-label', `Set ${index + 1}: ${firstLabel}`);
+    row.querySelector('.input-val-2').setAttribute('aria-label', `Set ${index + 1}: ${secondLabel}`);
+    const firstHeading = row.querySelector('.log-field-first .log-field-name');
+    const secondHeading = row.querySelector('.log-field-second .log-field-name');
+    if (firstHeading) firstHeading.textContent = ex.type === 'cardio' ? 'MINS'
+      : row.dataset.loadType === 'external' ? CURRENT_LOG_UNIT.toUpperCase()
+      : `${LiftLogExerciseLoad.rawLabel(row.dataset.loadType).toUpperCase()} (${CURRENT_LOG_UNIT.toUpperCase()})`;
+    if (secondHeading) secondHeading.textContent = ex.type === 'cardio' ? (ex.cardioMetric || 'km').toUpperCase() : 'REPS';
+    row.querySelector('.remove-row').setAttribute('aria-label', `Remove set ${index + 1}`);
+    let modeLabel = row.querySelector('.log-row-mode');
+    if (modes.size > 1) {
+      if (!modeLabel) { modeLabel = document.createElement('span'); modeLabel.className = 'log-row-mode'; row.prepend(modeLabel); }
+      modeLabel.textContent = LiftLogExerciseLoad.rawLabel(row.dataset.loadType);
+    } else if (modeLabel) modeLabel.remove();
+  });
 }
 
 $("#btnAddRow").addEventListener("click", () => {
-    // Get weight from previous row to auto-fill
-    const rows = $$("#logRows .log-row");
-    let prevWeight = null;
-    if (rows.length > 0) {
-      const lastRow = rows[rows.length - 1];
-      const weightInput = lastRow.querySelector(".input-val-1");
-      prevWeight = weightInput.value || weightInput.placeholder;
-    }
-    addLogRow(DB.exercises[CURRENT_LOG_EX], null, false, prevWeight);
+  if (!ACTIVE_SESSION || LOG_SAVING) return;
+  const ex = loggerExercise();
+  addLogRow(ex, LiftLogLogging.nextRow(ex, loggerRows()));
+  captureLogDraft();
 });
+$("#logNotes").addEventListener('input', captureLogDraft);
 
-$("#btnSaveLog").addEventListener("click", () => {
-  const ex = DB.exercises[CURRENT_LOG_EX];
-  const rows = $$(".log-row");
-  const entries = [];
-  
-  rows.forEach(r => {
-    const v1 = r.querySelector(".input-val-1").value || r.querySelector(".input-val-1").getAttribute("placeholder");
-    const v2 = r.querySelector(".input-val-2").value || r.querySelector(".input-val-2").getAttribute("placeholder");
-    
-    if (v1 === "" && v2 === "") return;
-    
-    if (ex.type === 'cardio') {
-      entries.push({ time: v1, dist: v2 });
-    } else {
-      entries.push({ w: v1, r: v2 });
+async function saveLog() {
+  if (!ACTIVE_SESSION || !CURRENT_LOG_EX || LOG_SAVING) return;
+  const exId = CURRENT_LOG_EX;
+  const ex = loggerExercise();
+  const raw = { rows: loggerRows(), notes: $("#logNotes").value, unit: CURRENT_LOG_UNIT, loadType: CURRENT_LOG_MODE };
+  const result = LiftLogLogging.parseRows(ex, raw.rows, raw.unit, {snapshotNew: true, loadType: CURRENT_LOG_MODE, bodyweightSnapshot: ACTIVE_SESSION.bodyweightSnapshot});
+  if (result.error) {
+    $("#logError").textContent = result.error;
+    const invalidRow = $$("#logRows .log-row")[result.row];
+    if (invalidRow) {
+      const first = invalidRow.querySelector('.input-val-1');
+      (first.hidden ? invalidRow.querySelector('.input-val-2') : first).focus();
     }
-  });
-  
-  ACTIVE_SESSION.entries[CURRENT_LOG_EX] = entries;
+    return;
+  }
+  const session = ACTIVE_SESSION;
+  const beforeCompleted = (session.order || Object.keys(session.entries)).filter(id => LiftLogDates.completedSets(session.entries[id] || [], DB.exercises[id]).length > 0);
+  const oldEntries = session.entries[exId];
+  const oldNotes = session.exerciseNotes?.[exId];
+  session.entries[exId] = result.entries;
+  session.exerciseNotes ||= {};
+  session.exerciseNotes[exId] = raw.notes;
+  session.logDrafts ||= {};
+  delete session.logDrafts[exId];
+  LOG_SAVING = true;
+  const controls = Array.from($$("#logModal input, #logModal textarea, #logModal button"));
+  controls.forEach(control => control.disabled = true);
+  const saved = await saveDraft();
+  LOG_SAVING = false;
+  controls.forEach(control => control.disabled = false);
+  if (!saved) {
+    if (oldEntries === undefined) delete session.entries[exId];
+    else session.entries[exId] = oldEntries;
+    if (oldNotes === undefined) delete session.exerciseNotes[exId];
+    else session.exerciseNotes[exId] = oldNotes;
+    session.logDrafts[exId] = raw;
+    $("#logError").textContent = 'These changes could not be saved. Keep this workout open and try again.';
+    return;
+  }
   $("#logModal").classList.add("hidden");
-  document.body.style.overflow = "";
+  LOGGER_SCROLL_LOCK.release('logger');
+  CURRENT_LOG_EX = null;
+  if (ACTIVE_SESSION) renderActiveSession(ACTIVE_SESSION.id === session.id ? { beforeCompleted, savedExercise: exId } : undefined);
+  restoreLoggerFocus(exId);
+}
+$("#btnSaveLog").addEventListener("click", saveLog);
+
+async function closeLogger() {
+  if (LOG_SAVING || !CURRENT_LOG_EX) return;
+  const exId = CURRENT_LOG_EX;
+  if (!await captureLogDraft()) return;
+  $("#logModal").classList.add("hidden");
+  LOGGER_SCROLL_LOCK.release('logger');
+  CURRENT_LOG_EX = null;
   renderActiveSession();
+  restoreLoggerFocus(exId);
+}
+function restoreLoggerFocus(exId) {
+  const target = document.querySelector?.(`#activeExerciseList [data-exercise-id="${exId}"] .exercise-open`) || $("#btnAddExToWorkout");
+  restoreModalFocus(LOGGER_RETURN_FOCUS, target);
+  LOGGER_RETURN_FOCUS = null;
+  LiftLogUpdates.notifySafe();
+}
+$("#logModalClose").addEventListener("click", closeLogger);
+$("#logModal").addEventListener("click", event => {
+  if (event.target === $("#logModal")) closeLogger();
+});
+$("#logModal").addEventListener('keydown', event => {
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeLogger(); return; }
+  trapModalFocus(event, $("#logModal"));
 });
 
-$("#logModalClose").addEventListener("click", () => {
-  $("#logModal").classList.add("hidden");
-  document.body.style.overflow = "";
-});
-
-// Close log modal when clicking outside drawer
-$("#logModal").addEventListener("click", (e) => {
-  if (e.target === $("#logModal")) {
-    $("#logModal").classList.add("hidden");
-    document.body.style.overflow = "";
+async function swapLoggerExercise() {
+  const blocked = () => COMMITTING || FINISHING || UPDATE_LOCK || STARTING || !STORE_READY || STORAGE_ERROR;
+  if (!ACTIVE_SESSION || !CURRENT_LOG_EX || LOG_SAVING || LOG_SWAPPING || blocked()) return;
+  const sourceId = CURRENT_LOG_EX, originalId = ACTIVE_SESSION.id, originalStart = ACTIVE_SESSION.start, epoch = STORAGE_EPOCH;
+  const sourceScrollTop = $("#logModal .drawer-body").scrollTop;
+  const source = DB.exercises[sourceId];
+  const sameSession = () => ACTIVE_SESSION?.id === originalId && ACTIVE_SESSION.start === originalStart && STORAGE_EPOCH === epoch;
+  const restore = message => {
+    LOG_SWAPPING = false;
+    if (!sameSession() || !ACTIVE_SESSION.order?.includes(sourceId)) return;
+    openLogger(sourceId, {preserveScroll: true, preserveLauncher: true});
+    $("#logModal .drawer-body").scrollTop = sourceScrollTop;
+    if (message) $("#logError").textContent = message;
+    $("#btnSwapLogExercise").focus?.({preventScroll: true});
+  };
+  LOG_SWAPPING = true;
+  const controls = Array.from($$("#logModal input, #logModal textarea, #logModal button"));
+  let flushed = false;
+  try {
+    // Capture before locking: even a half-entered row must reach storage before
+    // the logger can disappear or another exercise can open.
+    const pending = captureLogDraft();
+    LOG_SAVING = true; controls.forEach(control => control.disabled = true);
+    flushed = await pending;
+  } catch (error) { storageFailure(error); }
+  finally { LOG_SAVING = false; controls.forEach(control => control.disabled = false); }
+  if (!flushed || !sameSession() || blocked()) {
+    LOG_SWAPPING = false;
+    $("#logError").textContent = 'Your inputs could not be saved. Keep this workout open and try again.';
+    return;
   }
-});
-
-// Helper: Find last session
-function findLastSessionWithExercise(exId) {
-  for (const sess of DB.sessions) {
-    if (sess.entries && sess.entries[exId] && sess.entries[exId].length > 0) {
-      return { date: sess.start, sets: sess.entries[exId] };
+  $("#logModal").classList.add('hidden'); CURRENT_LOG_EX = null;
+  openExercisePicker(async targetId => {
+    if (!sameSession() || blocked()) { restore('The workout changed. Try again.'); return; }
+    const target = DB.exercises[targetId];
+    const category = exercise => exercise?.type === 'cardio' ? 'Cardio' : exercise?.muscle || 'Other';
+    if (!target || target.archived || category(target) !== category(source)) { restore('Choose an exercise for the same muscle group.'); return; }
+    let plan = LiftLogLogging.planExerciseSwap(ACTIVE_SESSION, sourceId, targetId);
+    if (!plan) { restore('This exercise changed. Try again.'); return; }
+    if (plan.keepSource && !plan.alreadyPresent) {
+      if (!await askConfirm('Keep current work?', `Keep ${source.name} and its sets and notes, then add ${target.name} after it?`)) { restore(); return; }
+      if (!sameSession() || blocked()) { restore('The workout changed. Try again.'); return; }
+      plan = LiftLogLogging.planExerciseSwap(ACTIVE_SESSION, sourceId, targetId);
+      if (!plan) { restore('This exercise changed. Try again.'); return; }
     }
-  }
-  return null;
+    if (!plan.alreadyPresent) {
+      const expected = copyState(ACTIVE_SESSION);
+      ACTIVE_SESSION.order = plan.order;
+      if (!plan.keepSource) {
+        for (const field of ['entries', 'logDrafts', 'exerciseNotes']) if (ACTIVE_SESSION[field]) delete ACTIVE_SESSION[field][sourceId];
+      }
+      let saved = false;
+      LOG_SAVING = true; COMMITTING = true; updateSaveStatus();
+      try { saved = await saveDraft(); }
+      catch (error) { storageFailure(error); }
+      finally { LOG_SAVING = false; COMMITTING = false; updateSaveStatus(); }
+      if (!saved) {
+        if (sameSession()) {
+          if (LiftLogStorage.equal(ACTIVE_SESSION.order, plan.order)) ACTIVE_SESSION.order = expected.order;
+          if (!plan.keepSource) for (const field of ['entries', 'logDrafts', 'exerciseNotes']) {
+            if (Object.hasOwn(expected[field] || {}, sourceId) && !Object.hasOwn(ACTIVE_SESSION[field] || {}, sourceId)) {
+              ACTIVE_SESSION[field] ||= {}; ACTIVE_SESSION[field][sourceId] = expected[field][sourceId];
+            }
+          }
+        }
+        restore('The swap could not be saved. Your original exercise is still here.'); return;
+      }
+    }
+    LOG_SWAPPING = false;
+    if (!sameSession()) return;
+    renderActiveSession(); openLogger(targetId, {preserveLauncher: true});
+    $("#logModalClose").focus?.({preventScroll: true});
+  }, () => restore(), {filter: source.type === 'cardio' ? 'Cardio' : source.muscle || 'Other', title: 'SWAP EXERCISE',
+    excludeIds: [sourceId], lockedFilter: true, allowCreate: false});
+  LOGGER_SCROLL_LOCK.release('logger');
+}
+$("#btnSwapLogExercise").addEventListener('click', swapLoggerExercise);
+
+function findLastSessionWithExercise(exId, context = null) {
+  return LiftLogLogging.findLast(exId, DB.exercises[exId] || {}, DB.sessions, context);
 }
 
 // --- TEMPLATES ---
-$("#btnSaveTemplate").addEventListener("click", () => {
-    const name = prompt("Name this routine:");
+function renderRoutineStartCards() {
+  const container = $("#routineStartCards");
+  container.replaceChildren();
+  Object.values(DB.templates).forEach(template => {
+    const exercises = (template.exercises || []).map(item => DB.exercises[item.exId]).filter(Boolean);
+    const card = document.createElement('button');
+    card.className = 'routine-start-card';
+    card.innerHTML = `<strong>${escapeHTML(template.name)}</strong><span class="routine-exercises">${exercises.map(ex => {
+      const muscle = ex.type === 'cardio' ? 'Cardio' : ex.muscle || 'Other';
+      return `<span class="routine-exercise"><i style="--muscle-color:${MUSCLE_COLORS[muscle] || '#999'}"></i><span>${escapeHTML(ex.name)}<small>${escapeHTML(muscle)}</small></span></span>`;
+    }).join('')}</span>`;
+    card.addEventListener('click', () => startWorkout(template));
+    container.appendChild(card);
+  });
+}
+$("#btnSaveTemplate").addEventListener("click", async () => {
+    const name = await askText("Save routine", "Name this routine:");
     if(!name) return;
     const tId = uid();
     const exercises = ACTIVE_SESSION.order.map(id => ({ exId: id }));
     DB.templates[tId] = { id: tId, name, exercises };
     saveDB();
-    alert("Routine saved.");
+    showNotice("Routine saved.");
 });
 
 function renderTemplates() {
-    const sel = $("#templateSelect");
-    const list = $("#templateList");
-    sel.innerHTML = '<option value="">Select Template...</option>';
-    list.innerHTML = "";
-
-    Object.values(DB.templates).forEach(t => {
-        sel.innerHTML += `<option value="${t.id}">${t.name}</option>`;
-
-        const li = document.createElement("li");
-        li.innerHTML = `
-            <span>${t.name}</span>
-            <div>
-              <button class="btn-ghost small" onclick="editTemplate('${t.id}')">EDIT</button>
-              <button class="btn-ghost small text-red" onclick="deleteTemplate('${t.id}')">DEL</button>
-            </div>
-        `;
-        list.appendChild(li);
-    });
+  const list = $("#templateList");
+  list.innerHTML = "";
+  renderRoutineStartCards();
+  if (!Object.keys(DB.templates).length) {
+    list.innerHTML = '<li class="library-empty">Create a routine to keep your exercises in order and start faster.</li>';
+    return;
+  }
+  Object.values(DB.templates).forEach(template => {
+    const li = document.createElement('li');
+    li.className = 'library-routine';
+    const items = template.exercises || [];
+    const preview = items.map(item => {
+      const ex = DB.exercises[item.exId];
+      const muscle = ex?.type === 'cardio' ? 'Cardio' : ex?.muscle || 'Other';
+      return `<span class="library-routine-exercise"><i style="--routine-muscle:${MUSCLE_COLORS[muscle] || '#999'}" aria-hidden="true"></i><span>${escapeHTML(ex?.name || 'Unavailable exercise')}</span></span>`;
+    }).join('');
+    li.innerHTML = `<div class="library-routine-heading"><h3>${escapeHTML(template.name)}</h3><span>${items.length} ${items.length === 1 ? 'exercise' : 'exercises'}</span></div>
+      <div class="library-routine-preview">${preview}</div>
+      <div class="library-routine-actions"><button class="btn-white small routine-edit" type="button" aria-label="Edit ${escapeHTML(template.name)}">EDIT ROUTINE</button><button class="btn-ghost small text-red routine-delete" type="button" aria-label="Delete ${escapeHTML(template.name)}">DELETE</button></div>`;
+    const edit = li.querySelector('.routine-edit');
+    edit.dataset.editRoutine = template.id;
+    edit.addEventListener('click', () => editTemplate(template.id));
+    li.querySelector('.routine-delete').addEventListener('click', () => deleteTemplate(template.id));
+    list.appendChild(li);
+  });
 }
 
-function deleteTemplate(id) {
-    if(!confirm("Delete routine?")) return;
-    delete DB.templates[id];
-    saveDB();
+function routineStorageBlocked() {
+  return !STORE_READY || STORAGE_ERROR || UPDATE_LOCK || COMMITTING || FINISHING || STARTING;
+}
+async function persistRoutine(id, next, baseline, epoch) {
+  if (routineStorageBlocked()) return {ok: false, error: 'Your changes could not be saved. Try again.'};
+  COMMITTING = true; updateSaveStatus();
+  let committed = false;
+  try {
+    if (!await flushSaves()) return {ok: false, error: 'Your changes could not be saved. Try again.'};
+    if (STORAGE_EPOCH !== epoch || !LiftLogStorage.equal(DB.templates[id] ?? null, baseline)) {
+      return {ok: false, error: 'This routine changed elsewhere. Close this editor and reopen the latest version.'};
+    }
+    const base = copyState(DB), edited = copyState(DB);
+    if (next === null) delete edited.templates[id];
+    else edited.templates[id] = copyState(next);
+    // Commit an isolated copy. A failed write leaves DB and the editor draft intact.
+    const result = await STORE.saveDB(edited, base, {epoch});
+    committed = true;
+    applySnapshot(result);
+    return {ok: true};
+  } catch (error) {
+    if (committed) { showNotice('Your routine was saved. Reload LiftLog to refresh the screen.', 'error'); return {ok: true}; }
+    return {ok: false, error: error.message || 'Your changes could not be saved. Try again.'};
+  } finally { COMMITTING = false; updateSaveStatus(); LiftLogUpdates.notifySafe(); }
+}
+let _deletingRoutine = false;
+async function deleteTemplate(id) {
+  if (_deletingRoutine || routineStorageBlocked() || !DB.templates[id]) return;
+  const original = copyState(DB.templates[id]), epoch = STORAGE_EPOCH;
+  _deletingRoutine = true;
+  try {
+    if (!await askConfirm('Delete routine?', 'Past workouts will stay in History.')) return;
+    const result = await persistRoutine(id, null, original, epoch);
+    if (!result.ok) { showNotice(result.error, 'error'); return; }
     renderTemplates();
+  } finally { _deletingRoutine = false; }
 }
 
 // --- TEMPLATE BUILDER ---
 let _templateBuilderExercises = [];
 let _editingTemplateId = null;
+let _templateBaseline = null;
+let _templateEpoch = 0;
+let _templateOpen = false;
+let _templateBusy = false;
+let _templateConfirming = false;
+let _templateReturnFocus = null;
+let _templateDrag = null;
 
-$("#btnNewTemplate").addEventListener("click", () => {
-  _templateBuilderExercises = [];
-  _editingTemplateId = null;
-  $("#templateBuilderName").value = "";
-  $("#templateBuilderTitle").textContent = "CREATE ROUTINE";
-  renderTemplateBuilderList();
-  $("#templateBuilderModal").classList.remove("hidden");
-  document.body.style.overflow = "hidden";
-});
-
-function editTemplate(id) {
-  const template = DB.templates[id];
-  if (!template) return;
-
-  _editingTemplateId = id;
-  _templateBuilderExercises = template.exercises.map(e => e.exId);
-  $("#templateBuilderName").value = template.name;
-  $("#templateBuilderTitle").textContent = "EDIT ROUTINE";
-  renderTemplateBuilderList();
-  $("#templateBuilderModal").classList.remove("hidden");
-  document.body.style.overflow = "hidden";
+function templateBuilderBlocked() { return !_templateOpen || _templateBusy || _templateConfirming || routineStorageBlocked(); }
+function templateBuilderDirty() {
+  return $("#templateBuilderName").value !== (_templateBaseline?.name || '')
+    || !LiftLogStorage.equal(_templateBuilderExercises, _templateBaseline?.exercises || []);
 }
+function openTemplateBuilder(template = null) {
+  if (_templateOpen || routineStorageBlocked()) return;
+  _templateReturnFocus = document.activeElement;
+  _templateBaseline = template ? copyState(template) : null;
+  _templateEpoch = STORAGE_EPOCH;
+  _editingTemplateId = template?.id || null;
+  _templateBuilderExercises = copyState(template?.exercises || []);
+  _templateOpen = true;
+  $("#templateBuilderName").value = template?.name || '';
+  $("#templateBuilderTitle").textContent = template ? 'EDIT ROUTINE' : 'CREATE ROUTINE';
+  $("#templateBuilderError").textContent = '';
+  $("#templateBuilderStatus").textContent = '';
+  renderTemplateBuilderList();
+  $("#templateBuilderModal").classList.remove('hidden');
+  LOGGER_SCROLL_LOCK.acquire('routine-builder');
+  resetEditorScroll($("#templateBuilderBody"));
+  $("#templateBuilderTitle").focus({preventScroll: true});
+}
+$("#btnNewTemplate").addEventListener('click', () => openTemplateBuilder());
+function editTemplate(id) { if (DB.templates[id]) openTemplateBuilder(DB.templates[id]); }
 
-$("#btnAddExToTemplate").addEventListener("click", () => {
-  // Temporarily hide the template builder so picker appears on top
-  $("#templateBuilderModal").classList.add("hidden");
-
-  openExercisePicker(
-    // On select callback
-    (exId) => {
-      if (!_templateBuilderExercises.includes(exId)) {
-        _templateBuilderExercises.push(exId);
-      }
-      // Reopen template builder after selection
-      renderTemplateBuilderList();
-      $("#templateBuilderModal").classList.remove("hidden");
-    },
-    // On cancel callback
-    () => {
-      // Reopen template builder if picker was cancelled
-      renderTemplateBuilderList();
-      $("#templateBuilderModal").classList.remove("hidden");
-    }
-  );
+function finishTemplateBuilder() {
+  cancelTemplateDrag();
+  _templateOpen = false; _editingTemplateId = null; _templateBaseline = null; _templateBuilderExercises = [];
+  $("#templateBuilderModal").classList.add('hidden');
+  LOGGER_SCROLL_LOCK.release('routine-builder');
+  const id = _templateReturnFocus?.dataset?.editRoutine;
+  const target = _templateReturnFocus?.isConnected ? _templateReturnFocus
+    : id ? document.querySelector(`[data-edit-routine="${id}"]`) || $("#btnNewTemplate") : $("#btnNewTemplate");
+  target?.focus({preventScroll: true});
+  _templateReturnFocus = null;
+  LiftLogUpdates.notifySafe();
+}
+async function closeTemplateBuilder() {
+  if (!_templateOpen || _templateBusy || _templateConfirming) return;
+  cancelTemplateDrag();
+  if (templateBuilderDirty()) {
+    _templateConfirming = true;
+    let discard;
+    try { discard = await askConfirm('Discard routine edits?', 'Your saved routine will stay unchanged.'); }
+    finally { _templateConfirming = false; }
+    if (!discard) return;
+  }
+  finishTemplateBuilder();
+}
+$("#btnCloseTemplateBuilder").addEventListener('click', closeTemplateBuilder);
+$("#templateBuilderModal").addEventListener('click', event => { if (event.target === $("#templateBuilderModal")) closeTemplateBuilder(); });
+$("#templateBuilderModal").addEventListener('keydown', event => {
+  if (event.key === 'Escape') { event.preventDefault(); if (_templateDrag) cancelTemplateDrag(); else closeTemplateBuilder(); return; }
+  if (event.key !== 'Tab' || _templateBusy) return;
+  const controls = [...$("#templateBuilderModal").querySelectorAll('button, input')].filter(node => !node.disabled && node.getClientRects().length);
+  const first = controls[0], last = controls[controls.length - 1];
+  if (!first) return;
+  if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && (document.activeElement === last || !controls.includes(document.activeElement))) { event.preventDefault(); first.focus(); }
 });
 
+$("#btnAddExToTemplate").addEventListener('click', () => {
+  if (templateBuilderBlocked()) return;
+  cancelTemplateDrag();
+  $("#templateBuilderModal").classList.add('hidden');
+  const restore = () => {
+    if (!_templateOpen) return;
+    renderTemplateBuilderList();
+    $("#templateBuilderModal").classList.remove('hidden');
+    $("#btnAddExToTemplate").focus({preventScroll: true});
+  };
+  openExercisePicker(exId => {
+    if (!_templateOpen || routineStorageBlocked()) { restore(); return; }
+    if (!_templateBuilderExercises.some(item => item.exId === exId)) {
+      _templateBuilderExercises.push({exId}); clearTemplateValidation();
+    }
+    restore();
+  }, restore);
+});
+
+function clearTemplateValidation() {
+  const error = $("#templateBuilderError");
+  if (['Enter a routine name.', 'Add at least one exercise.'].includes(error.textContent)) error.textContent = '';
+}
+$("#templateBuilderName").addEventListener('input', clearTemplateValidation);
+
+function moveTemplateExercise(from, to) {
+  if (templateBuilderBlocked() || !Number.isInteger(from) || !Number.isInteger(to) || from === to || from < 0 || to < 0 || from >= _templateBuilderExercises.length || to >= _templateBuilderExercises.length) return false;
+  const [item] = _templateBuilderExercises.splice(from, 1);
+  _templateBuilderExercises.splice(to, 0, item);
+  clearTemplateValidation();
+  renderTemplateBuilderList();
+  $("#templateBuilderList").children[to]?.querySelector('.routine-drag-handle').focus({preventScroll: true});
+  const name = DB.exercises[item.exId]?.name || 'Exercise';
+  $("#templateBuilderStatus").textContent = `${name} moved to position ${to + 1} of ${_templateBuilderExercises.length}.`;
+  return true;
+}
+async function removeTemplateExercise(index) {
+  if (templateBuilderBlocked()) return;
+  const item = _templateBuilderExercises[index];
+  if (!item) return;
+  cancelTemplateDrag();
+  _templateConfirming = true;
+  let accepted;
+  try { accepted = await askConfirm('Remove exercise?', `Remove ${DB.exercises[item.exId]?.name || 'this exercise'} from this routine? Past workouts will stay unchanged.`); }
+  finally { _templateConfirming = false; }
+  if (!accepted || templateBuilderBlocked()) return;
+  const current = _templateBuilderExercises.indexOf(item);
+  if (current < 0) return;
+  _templateBuilderExercises.splice(current, 1);
+  clearTemplateValidation();
+  renderTemplateBuilderList();
+  const target = $("#templateBuilderList").children[Math.min(current, _templateBuilderExercises.length - 1)]?.querySelector('.routine-remove') || $("#btnAddExToTemplate");
+  target.focus({preventScroll: true});
+  $("#templateBuilderStatus").textContent = 'Exercise removed from this draft.';
+}
 function renderTemplateBuilderList() {
   const container = $("#templateBuilderList");
-  container.innerHTML = "";
-
-  if (_templateBuilderExercises.length === 0) {
-    container.innerHTML = '<div class="template-builder-empty">No exercises added yet</div>';
+  container.innerHTML = '';
+  $("#templateExerciseCount").textContent = `${_templateBuilderExercises.length} ${_templateBuilderExercises.length === 1 ? 'exercise' : 'exercises'}`;
+  if (!_templateBuilderExercises.length) {
+    container.innerHTML = '<p class="template-builder-empty">Add your first exercise.</p>';
     return;
   }
-
-  _templateBuilderExercises.forEach((exId, idx) => {
-    const ex = DB.exercises[exId];
-    if (!ex) return;
-
-    const category = ex.type === 'cardio' ? 'Cardio' : (ex.muscle || 'Other');
-    const color = MUSCLE_COLORS[category] || '#999';
-
-    const div = document.createElement("div");
-    div.className = "template-builder-item";
-    div.style.borderLeftColor = color;
-    div.innerHTML = `
-      <span>${ex.name} <span class="muscle-tag" style="background:${color}">${category}</span></span>
-      <button class="btn-ghost small text-red" data-idx="${idx}">✕</button>
-    `;
-    div.querySelector("button").addEventListener("click", () => {
-      _templateBuilderExercises.splice(idx, 1);
-      renderTemplateBuilderList();
+  _templateBuilderExercises.forEach((item, index) => {
+    const ex = DB.exercises[item.exId];
+    const category = ex?.type === 'cardio' ? 'Cardio' : ex?.muscle || 'Other';
+    const row = document.createElement('div');
+    row.className = 'routine-builder-row'; row.dataset.index = index;
+    row.style.setProperty('--routine-muscle', MUSCLE_COLORS[category] || '#999');
+    const name = ex?.name || 'Unavailable exercise';
+    const sets = item.sets ? ` · ${escapeHTML(item.sets)} ${Number(item.sets) === 1 ? 'set' : 'sets'}` : '';
+    row.innerHTML = `<button class="routine-drag-handle" type="button" aria-label="Reorder ${escapeHTML(name)}, position ${index + 1} of ${_templateBuilderExercises.length}" aria-describedby="routineReorderHelp"><span aria-hidden="true">⠿</span></button>
+      <div class="routine-builder-copy"><strong>${escapeHTML(name)}</strong><span><i aria-hidden="true"></i>${escapeHTML(category)}${sets}</span></div>
+      <button class="routine-remove" type="button" aria-label="Remove ${escapeHTML(name)} from routine">×</button>`;
+    const handle = row.querySelector('.routine-drag-handle');
+    handle.addEventListener('keydown', event => {
+      const to = event.key === 'ArrowUp' ? index - 1 : event.key === 'ArrowDown' ? index + 1 : event.key === 'Home' ? 0 : event.key === 'End' ? _templateBuilderExercises.length - 1 : null;
+      if (to === null) return;
+      event.preventDefault(); moveTemplateExercise(index, to);
     });
-    container.appendChild(div);
+    handle.addEventListener('pointerdown', event => startTemplateDrag(event, index, row, handle));
+    handle.addEventListener('pointermove', moveTemplateDrag);
+    handle.addEventListener('pointerup', endTemplateDrag);
+    handle.addEventListener('pointercancel', cancelTemplateDrag);
+    handle.addEventListener('lostpointercapture', cancelTemplateDrag);
+    row.querySelector('.routine-remove').addEventListener('click', () => removeTemplateExercise(index));
+    container.appendChild(row);
   });
 }
+function cancelTemplateDrag() {
+  const drag = _templateDrag;
+  if (!drag) return;
+  _templateDrag = null;
+  drag.row.classList.remove('is-dragging'); drag.row.style.removeProperty('transform');
+  $("#templateBuilderList").querySelectorAll('.is-drop-target').forEach(row => row.classList.remove('is-drop-target'));
+  if (drag.handle.hasPointerCapture?.(drag.pointerId)) drag.handle.releasePointerCapture(drag.pointerId);
+}
+function startTemplateDrag(event, index, row, handle) {
+  cancelTemplateDrag();
+  if (templateBuilderBlocked() || event.isPrimary === false || (event.pointerType === 'mouse' && event.button !== 0)) return;
+  event.preventDefault();
+  _templateDrag = {pointerId: event.pointerId, from: index, to: index, startY: event.clientY, offset: 0, scrollStart: $("#templateBuilderBody").scrollTop, row, handle};
+  handle.setPointerCapture(event.pointerId);
+  row.classList.add('is-dragging');
+}
+function moveTemplateDrag(event) {
+  const drag = _templateDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  if (templateBuilderBlocked()) { cancelTemplateDrag(); return; }
+  event.preventDefault();
+  const pane = $("#templateBuilderBody"), bounds = pane.getBoundingClientRect();
+  if (event.clientY < bounds.top + 45) pane.scrollTop -= 12;
+  else if (event.clientY > bounds.bottom - 45) pane.scrollTop += 12;
+  const rows = [...$("#templateBuilderList").children];
+  let closest = drag.from, distance = Infinity;
+  rows.forEach((row, index) => {
+    const rect = row.getBoundingClientRect();
+    const center = (rect.top + rect.bottom) / 2 - (index === drag.from ? drag.offset : 0);
+    const delta = Math.abs(event.clientY - center);
+    if (delta < distance) { closest = index; distance = delta; }
+    row.classList.remove('is-drop-target');
+  });
+  drag.to = closest;
+  if (closest !== drag.from) rows[closest].classList.add('is-drop-target');
+  drag.offset = event.clientY - drag.startY + pane.scrollTop - drag.scrollStart;
+  drag.row.style.transform = `translateY(${drag.offset}px)`;
+}
+function endTemplateDrag(event) {
+  const drag = _templateDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const {from, to} = drag;
+  cancelTemplateDrag();
+  moveTemplateExercise(from, to);
+}
+document.addEventListener('pointerdown', event => {
+  if (_templateDrag && event.pointerId !== _templateDrag.pointerId) cancelTemplateDrag();
+}, {passive: true});
 
-$("#btnCloseTemplateBuilder").addEventListener("click", () => {
-  // Warn if exercises have been added
-  if (_templateBuilderExercises.length > 0) {
-    if (!confirm("You have exercises added. Discard this routine?")) return;
-  }
-  $("#templateBuilderModal").classList.add("hidden");
-  document.body.style.overflow = "";
-});
-
-// Close template builder when clicking outside
-$("#templateBuilderModal").addEventListener("click", (e) => {
-  if (e.target === $("#templateBuilderModal")) {
-    // Warn if exercises have been added
-    if (_templateBuilderExercises.length > 0) {
-      if (!confirm("You have exercises added. Discard this routine?")) return;
-    }
-    $("#templateBuilderModal").classList.add("hidden");
-    document.body.style.overflow = "";
-  }
-});
-
-$("#btnSaveTemplateBuilder").addEventListener("click", () => {
-  const name = $("#templateBuilderName").value.trim();
-  if (!name) {
-    alert("Please enter a routine name");
-    return;
-  }
-  if (_templateBuilderExercises.length === 0) {
-    alert("Please add at least one exercise");
-    return;
-  }
-
-  const exercises = _templateBuilderExercises.map(id => ({ exId: id }));
-
-  if (_editingTemplateId) {
-    // Update existing template
-    DB.templates[_editingTemplateId].name = name;
-    DB.templates[_editingTemplateId].exercises = exercises;
-  } else {
-    // Create new template
-    const tId = uid();
-    DB.templates[tId] = { id: tId, name, exercises };
-  }
-
-  saveDB();
-  _editingTemplateId = null;
-  $("#templateBuilderModal").classList.add("hidden");
-  document.body.style.overflow = "";
-  renderTemplates();
+$("#btnSaveTemplateBuilder").addEventListener('click', async () => {
+  if (templateBuilderBlocked()) return;
+  cancelTemplateDrag();
+  const rawName = $("#templateBuilderName").value;
+  const name = rawName === _templateBaseline?.name ? rawName : rawName.trim();
+  const error = $("#templateBuilderError"); error.textContent = '';
+  if (!name.trim()) { error.textContent = 'Enter a routine name.'; $("#templateBuilderName").focus(); return; }
+  if (!_templateBuilderExercises.length) { error.textContent = 'Add at least one exercise.'; $("#btnAddExToTemplate").focus(); return; }
+  if (!templateBuilderDirty()) { finishTemplateBuilder(); return; }
+  const id = _editingTemplateId || uid();
+  const next = {...copyState(_templateBaseline || {}), id, name, exercises: copyState(_templateBuilderExercises)};
+  _templateBusy = true;
+  const controls = [...$("#templateBuilderModal").querySelectorAll('button, input')];
+  controls.forEach(control => { control.disabled = true; });
+  const result = await persistRoutine(id, next, _templateBaseline, _templateEpoch);
+  _templateBusy = false;
+  controls.forEach(control => { control.disabled = false; });
+  if (!result.ok) { error.textContent = result.error; return; }
+  renderTemplates(); finishTemplateBuilder();
 });
 
 // --- HISTORY & STATS ---
 function renderHistory() {
   const cont = $("#historyLog");
+  const openMonths = new Set([...cont.querySelectorAll('details.history-month')].filter(item => item.open).map(item => item.dataset.month));
+  const openWorkouts = new Set([...cont.querySelectorAll('details.history-workout')].filter(item => item.open).map(item => item.dataset.session));
   cont.innerHTML = "";
 
   if (DB.sessions.length === 0) {
@@ -1604,114 +2262,101 @@ function renderHistory() {
     return;
   }
 
-  const bw = getLatestBodyweight();
-
   // Group sessions by month
   const monthGroups = {};
-  DB.sessions.forEach((sess, idx) => {
+  DB.sessions.forEach(sess => {
     const date = new Date(sess.start);
     const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
     const monthLabel = date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
     if (!monthGroups[monthKey]) {
       monthGroups[monthKey] = { label: monthLabel, sessions: [] };
     }
-    monthGroups[monthKey].sessions.push({ sess, idx });
+    monthGroups[monthKey].sessions.push(sess);
   });
 
   // Render each month group
   const sortedMonths = Object.keys(monthGroups).sort().reverse();
-  sortedMonths.forEach((monthKey, monthIdx) => {
+  sortedMonths.forEach(monthKey => {
     const group = monthGroups[monthKey];
-    const isCurrentMonth = monthIdx === 0;
 
-    const monthDiv = document.createElement("div");
+    const monthDiv = document.createElement("details");
     monthDiv.className = "history-month";
+    monthDiv.dataset.month = monthKey;
+    monthDiv.open = openMonths.has(monthKey);
 
-    const header = document.createElement("div");
+    const header = document.createElement("summary");
     header.className = "history-month-header";
     header.innerHTML = `
-      <span>${group.label} (${group.sessions.length} workouts)</span>
-      <span class="month-toggle">${isCurrentMonth ? '▲' : '▼'}</span>
+      <span class="history-month-copy"><strong>${escapeHTML(group.label)}</strong><small>${group.sessions.length} ${group.sessions.length === 1 ? 'workout' : 'workouts'}</small></span>
+      <span class="history-chevron" aria-hidden="true"></span>
     `;
 
     const content = document.createElement("div");
-    content.className = `history-month-content ${isCurrentMonth ? 'expanded' : ''}`;
+    content.className = 'history-month-content';
 
-    header.onclick = () => {
-      content.classList.toggle('expanded');
-      header.querySelector('.month-toggle').textContent = content.classList.contains('expanded') ? '▲' : '▼';
-    };
+    group.sessions.sort((a, b) => Date.parse(b.start) - Date.parse(a.start)).forEach(sess => {
+      const div = document.createElement("details");
+      div.className = "history-entry history-workout";
+      div.dataset.session = sess.id;
+      div.open = openWorkouts.has(sess.id);
 
-    group.sessions.forEach(({ sess, idx }) => {
-      const div = document.createElement("div");
-      div.className = "history-entry";
-
-      const date = new Date(sess.start).toDateString();
+      const date = new Date(sess.start).toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'});
 
       // Calculate workout duration
       let durationStr = "";
       if (sess.end) {
         const startTime = new Date(sess.start).getTime();
         const endTime = new Date(sess.end).getTime();
-        const durationMins = Math.round((endTime - startTime) / 60000);
-        if (durationMins >= 60) {
+        const durationMins = Math.max(0, Math.round((endTime - startTime) / 60000));
+        if (Number.isFinite(durationMins) && durationMins >= 60) {
           const hours = Math.floor(durationMins / 60);
           const mins = durationMins % 60;
-          durationStr = `${hours}h ${mins}m`;
-        } else {
+          durationStr = `${hours}h${mins ? ` ${mins}m` : ''}`;
+        } else if (Number.isFinite(durationMins)) {
           durationStr = `${durationMins}m`;
         }
       }
 
       let details = "";
-      (sess.order || []).forEach(exId => {
-         const sets = sess.entries[exId];
-         if(!sets || sets.length === 0) return;
+      const completedExercises = LiftLogDates.completedExerciseIds(sess, DB.exercises);
+      completedExercises.forEach(exId => {
          const ex = DB.exercises[exId];
+         const sets = LiftLogDates.completedSets(sess.entries[exId], ex);
          const exName = ex?.name || "Unknown";
          const unit = getWeightUnit();
          let badges = sets.map(s => {
-             if(s.w) {
-               const displayW = convertWeight(parseFloat(s.w));
-               if (ex?.isAssisted && bw) {
-                 const effectiveBw = convertWeight(bw);
-                 const effective = effectiveBw - displayW;
-                 return `<span class="set-tag">${effective.toFixed(1)}${unit} eff × ${s.r}</span>`;
-               }
-               return `<span class="set-tag">${displayW}${unit} × ${s.r}</span>`;
-             }
-             if(s.time) {
+             let value = '';
+             if(ex?.type !== 'cardio' && Number(s.r) > 0) {
+               value = escapeHTML(LiftLogLogging.formatStrengthSet(s, ex, unit));
+             } else if(Number(s.time) > 0 || Number(s.dist) > 0) {
                const metric = ex?.cardioMetric || 'km';
-               return `<span class="set-tag">${s.time}m / ${s.dist}${metric}</span>`;
+               value = `${escapeHTML(s.time || 0)}m / ${escapeHTML(s.dist || 0)}${escapeHTML(metric)}`;
              }
-             return "";
+             const estimate = ex?.type !== 'cardio' ? LiftLogLogging.estimatedSetText(s, unit) : '';
+             return value ? `<span class="history-set"><span class="set-tag">${value}</span>${estimate ? `<small class="muted">${escapeHTML(estimate)}</small>` : ''}${s.note ? `<span class="history-set-note">${escapeHTML(s.note)}</span>` : ''}</span>` : '';
          }).join("");
          const muscle = ex?.type === 'cardio' ? 'Cardio' : (ex?.muscle || 'Other');
          const muscleColor = MUSCLE_COLORS[muscle] || '#999';
-         details += `<div class="history-detail" style="border-left: 4px solid ${muscleColor}; padding-left: 8px;"><strong>${exName}</strong>${ex?.isAssisted ? ' <span class="muted small">(assisted)</span>' : ''}<br>${badges}</div>`;
+         details += `<div class="history-detail" style="--history-muscle:${muscleColor}"><strong>${escapeHTML(exName)}</strong>${badges}${sess.exerciseNotes?.[exId] ? `<p class="small">${escapeHTML(sess.exerciseNotes[exId])}</p>` : ""}</div>`;
       });
 
-      const templateBadge = sess.templateName
-        ? `<span class="template-badge">${sess.templateName}</span>`
-        : '<span class="template-badge freestyle">Freestyle</span>';
+      const routineName = sess.templateName || 'Freestyle';
 
       // Count only exercises that actually have logged entries
-      const loggedExerciseCount = (sess.order || []).filter(exId =>
-        sess.entries[exId] && sess.entries[exId].length > 0
-      ).length;
+      const loggedExerciseCount = completedExercises.length;
       const exerciseWord = loggedExerciseCount === 1 ? 'exercise' : 'exercises';
 
-      const notesHtml = sess.notes ? `<div class="history-notes"><em>${sess.notes}</em></div>` : '';
+      const notesHtml = sess.notes ? `<div class="history-notes"><strong>Workout notes</strong>${escapeHTML(sess.notes)}</div>` : '';
 
-      div.innerHTML = `
-        <div class="row">
-          <div class="history-date">${date}${durationStr ? ` <span class="muted small">(${durationStr})</span>` : ''}</div>
-          <button class="btn-ghost small text-red" onclick="deleteWorkout(${idx})">DELETE</button>
-        </div>
-        <div class="history-meta">${templateBadge} · ${loggedExerciseCount} ${exerciseWord}</div>
-        ${notesHtml}
-        ${details}
-      `;
+      const summary = document.createElement('summary');
+      summary.className = 'history-workout-summary';
+      summary.innerHTML = `<span class="history-summary-copy"><span class="history-summary-date">${escapeHTML(date)}</span><strong class="history-summary-name">${escapeHTML(routineName)}</strong><span class="history-summary-meta">${durationStr ? `${durationStr} · ` : ''}${loggedExerciseCount} ${exerciseWord}</span></span><span class="history-chevron" aria-hidden="true"></span>`;
+      const body = document.createElement('div');
+      body.className = 'history-workout-body';
+      body.innerHTML = `${notesHtml}${details || '<p class="muted small">No completed sets recorded.</p>'}<div class="history-workout-actions"><button class="btn-white history-edit">EDIT WORKOUT</button><button class="btn-ghost text-red history-delete">DELETE</button></div>`;
+      body.querySelector('.history-edit').addEventListener('click', () => editCompletedWorkout(sess.id));
+      body.querySelector('.history-delete').addEventListener('click', () => deleteWorkout(sess.id));
+      div.appendChild(summary); div.appendChild(body);
       content.appendChild(div);
     });
 
@@ -1721,10 +2366,12 @@ function renderHistory() {
   });
 }
 
-function deleteWorkout(index) {
-  if (!confirm("Delete this workout? This cannot be undone.")) return;
+async function deleteWorkout(sessionId) {
+  if (!await askConfirm("Delete workout?", "This workout will be removed from History. Export a backup first if you want to keep a copy.")) return;
+  const index = DB.sessions.findIndex(session => session.id === sessionId);
+  if (index < 0) return;
   DB.sessions.splice(index, 1);
-  saveDB();
+  if (!await saveDB()) return;
   renderHistory();
   renderDashboard(); // Update recent logs too
 }
@@ -1748,8 +2395,8 @@ function simpleLineChart(ctx, labels, dataPoints, color) {
   ctx.lineWidth = 3;
   
   dataPoints.forEach((val, i) => {
-    const x = padding + (i / (dataPoints.length - 1)) * (w - padding * 2);
-    const y = h - padding - ((val - minVal) / (maxVal - minVal)) * (h - padding * 2);
+    const x = padding + (i / Math.max(1, dataPoints.length - 1)) * (w - padding * 2);
+    const y = h - padding - ((val - minVal) / (maxVal - minVal || 1)) * (h - padding * 2);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
     
@@ -1770,19 +2417,43 @@ function renderStats() {
     renderBodyweightEntries();
     $("#bwInput").value = "";
 
-    // Populate select
+    const rangeControl = $("#progressRange");
+    document.querySelectorAll?.(".progress-period-tab").forEach(button => {
+      button.onclick = () => {
+        rangeControl.dataset.period = button.dataset.period;
+        if (button.dataset.period === 'custom') {
+          const recent = LiftLogDates.progressRange('month');
+          if (!$("#progressFrom").value) $("#progressFrom").value = LiftLogDates.localDayKey(recent.startDate);
+          if (!$("#progressTo").value) $("#progressTo").value = LiftLogDates.localDayKey(new Date());
+        }
+        updateStatsChart();
+      };
+    });
+    $("#progressFrom").onchange = updateStatsChart;
+    $("#progressTo").onchange = updateStatsChart;
+    $("#statLoadMode").onchange = () => {
+      const metric = $("#statChartType");
+      const measure = metric.value.endsWith('maxWeight') ? 'maxWeight' : 'volume';
+      metric.value = `${$("#statLoadMode").value}:${measure}`;
+      updateStatsChart();
+    };
+
+    // Rebuild after edits/imports while keeping a valid selection and historical archived lifts.
     const sel = $("#statExSelect");
-    if(sel.options.length === 0) {
-        Object.values(DB.exercises).forEach(ex => {
-            const opt = document.createElement("option");
-            opt.value = ex.id; opt.textContent = ex.name;
-            sel.appendChild(opt);
-        });
-        sel.addEventListener("change", () => {
-            _exerciseHistoryExpanded = false; // Reset when exercise changes
-            updateStatsChart();
-        });
-    }
+    const previous = sel.value;
+    const historicalIds = new Set(DB.sessions.flatMap(session => LiftLogDates.completedExerciseIds(session, DB.exercises)));
+    const exercises = Object.values(DB.exercises).filter(ex => !ex.archived || historicalIds.has(ex.id));
+    sel.innerHTML = "";
+    exercises.forEach(ex => {
+        const opt = document.createElement("option");
+        opt.value = ex.id; opt.textContent = `${ex.name}${ex.archived ? ' (archived)' : ''}`;
+        sel.appendChild(opt);
+    });
+    if (exercises.some(ex => ex.id === previous)) sel.value = previous;
+    sel.onchange = () => {
+        _exerciseHistoryExpanded = false;
+        updateStatsChart();
+    };
     updateStatsChart();
 
     // Render breakdown chart
@@ -1791,8 +2462,20 @@ function renderStats() {
 
 function updateStatsChart() {
     const exId = $("#statExSelect").value;
-    const chartType = $("#statChartType").value; // "volume" or "maxWeight"
+    const requestedMetric = $("#statChartType").value;
+    const chartType = requestedMetric.endsWith("maxWeight") ? "maxWeight" : "volume";
     const canvas = $("#progChart");
+    const selectedPeriod = $("#progressRange").dataset.period || 'all';
+    const dateRange = LiftLogDates.progressRange(selectedPeriod, $("#progressFrom").value, $("#progressTo").value);
+    $("#progressCustomDates").hidden = selectedPeriod !== 'custom';
+    const rangeStatus = $("#progressRangeStatus");
+    rangeStatus.textContent = dateRange.error || dateRange.label;
+    rangeStatus.classList?.toggle?.('is-error', !!dateRange.error);
+    [$("#progressFrom"), $("#progressTo")].forEach(input => input.setAttribute?.('aria-invalid', String(!!dateRange.error)));
+    document.querySelectorAll?.(".progress-period-tab").forEach(button => {
+      const selected = button.dataset.period === selectedPeriod;
+      button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected));
+    });
 
     // High-DPI canvas setup
     const dpr = window.devicePixelRatio || 1;
@@ -1805,131 +2488,155 @@ function updateStatsChart() {
     const h = rect.height;
 
     const isDark = document.body.classList.contains("theme-dark");
-    const textColor = isDark ? "#fff" : "#000";
+    const textColor = LiftLogTheme.chartColors().ink;
 
     const historyContainer = $("#exerciseHistory");
+    if (typeof updateChartInspection === "function") updateChartInspection(canvas, []);
 
     if(!exId) {
+        $("#statExercisePill").style.setProperty?.('--progress-muscle', MUSCLE_COLORS.Other || '#78909C');
+        $("#statLoadMode").hidden = true;
+        $("#statChartType").hidden = true;
         ctx.clearRect(0, 0, w, h);
         ctx.font = "14px -apple-system, sans-serif";
         ctx.fillStyle = textColor;
         ctx.textAlign = "center";
         ctx.fillText("Select an exercise", w / 2, h / 2);
+        canvas.setAttribute?.("aria-label", "Exercise progress. Select an exercise to see its history.");
+        if (typeof updateChartDataTable === "function") updateChartDataTable(canvas, "Exercise progress · no exercise selected", []);
+        const note = $("#statMetricNote"); if (note) { note.textContent = ''; note.hidden = true; }
         if (historyContainer) historyContainer.innerHTML = "";
+        $("#exerciseHistoryRegion").hidden = true;
+        const toggle = $("#btnToggleLiftHistory"); toggle.disabled = true;
+        toggle.setAttribute?.('aria-expanded', 'false'); toggle.setAttribute?.('aria-label', 'Expand lift history, no exercise selected');
         return;
     }
 
     const ex = DB.exercises[exId];
+    $("#statExercisePill").style.setProperty?.('--progress-muscle', MUSCLE_COLORS[ex?.type === 'cardio' ? 'Cardio' : ex?.muscle] || MUSCLE_COLORS.Other || '#78909C');
     const unit = getWeightUnit();
-
-    // Extract history - calculate total volume and max weight with unit conversion
-    const historyForDisplay = [];
-    DB.sessions.forEach(s => {
-        if(s.entries && s.entries[exId] && s.entries[exId].length > 0) {
-            let totalVolume = 0;
-            let maxWeight = 0;
-            const sets = s.entries[exId];
-            sets.forEach(set => {
-                const weight = convertWeight(parseFloat(set.w || 0));
-                const reps = parseInt(set.r || 0);
-                totalVolume += weight * reps;
-                if (weight > maxWeight) maxWeight = weight;
-            });
-            historyForDisplay.push({ date: s.start, volume: totalVolume, maxWeight: maxWeight, sets: sets });
-        }
+    const loadAPI = typeof LiftLogExerciseLoad !== "undefined" ? LiftLogExerciseLoad : null;
+    const setMode = set => loadAPI ? loadAPI.resolveSetMode(set, ex) : set.loadType || (ex?.isAssisted ? 'assisted' : 'external');
+    const metricSelect = $("#statChartType");
+    const allHistoryForDisplay = DB.sessions.map(session => ({ date: session.start,
+      sets: LiftLogDates.completedSets(session.entries?.[exId], ex) })).filter(item => item.sets.length)
+      .sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+    const historyForDisplay = allHistoryForDisplay.filter(item => LiftLogDates.inProgressRange(item.date, dateRange));
+    // Date ranges must not silently replace the selected load measure when empty.
+    const modes = [...new Set(allHistoryForDisplay.flatMap(item => item.sets.map(setMode)))];
+    const defaultMode = loadAPI ? loadAPI.resolveMode(ex) : ex?.isAssisted ? 'assisted' : 'external';
+    if (!modes.length) modes.push(defaultMode);
+    const requestedMode = requestedMetric.includes(':') ? requestedMetric.split(':')[0] : null;
+    const mode = metricSelect.dataset.exerciseId === exId && modes.includes(requestedMode) ? requestedMode
+      : modes.includes(defaultMode) ? defaultMode : modes[0];
+    const names = {
+      external: ['Volume', 'Max weight'], assisted: ['Assistance × reps', 'Highest assistance'],
+      weighted: ['Added weight × reps', 'Max added weight'], bodyweight: ['Total reps', 'Best set reps']
+    };
+    const metricName = names[mode][chartType === 'maxWeight' ? 1 : 0];
+    const metricUnit = mode === 'bodyweight' ? 'reps' : chartType === 'maxWeight' ? unit : `${unit} × reps`;
+    // Preserve historical measures and their values. Only the active load type's
+    // two choices appear in the slider, so mixed legacy records cannot crowd it.
+    const loadSelect = $("#statLoadMode");
+    const loadNames = { external: 'External weight', assisted: 'Machine assistance', weighted: 'Added weight', bodyweight: 'Bodyweight' };
+    loadSelect.innerHTML = '';
+    modes.forEach(loadMode => {
+      const option = document.createElement('option');
+      option.value = loadMode; option.textContent = loadNames[loadMode];
+      loadSelect.appendChild(option);
     });
+    loadSelect.value = mode;
+    loadSelect.hidden = modes.length <= 1;
+    metricSelect.hidden = false;
+    metricSelect.innerHTML = '';
+    modes.forEach(loadMode => ['volume', 'maxWeight'].forEach((measure, index) => {
+      const option = document.createElement('option');
+      option.value = modes.length > 1 ? `${loadMode}:${measure}` : measure;
+      option.textContent = names[loadMode][index];
+      option.hidden = loadMode !== mode;
+      metricSelect.appendChild(option);
+    }));
+    metricSelect.value = modes.length > 1 ? `${mode}:${chartType}` : chartType;
+    metricSelect.dataset.exerciseId = exId;
+    const assisted = mode === 'assisted';
+    const metricNote = $("#statMetricNote");
+    if (metricNote) {
+      const explanation = { external: '', assisted: 'Machine assistance logged; more assistance means more help.',
+        weighted: 'Added weight only. Bodyweight estimates are kept separate.', bodyweight: 'Reps only. Bodyweight estimates are kept separate.' }[mode];
+      metricNote.textContent = [modes.length > 1 ? 'Load types are shown separately. Choose a measure above.' : '', explanation].filter(Boolean).join(' ');
+      metricNote.hidden = !metricNote.textContent;
+    }
     // Chart needs oldest-first, display needs newest-first
-    const history = historyForDisplay.slice().reverse();
+    const history = historyForDisplay.map(item => {
+      const sets = item.sets.filter(set => setMode(set) === mode);
+      const values = sets.map(set => mode === 'bodyweight' ? Number(set.r) : convertWeight(Number(set.w) || 0));
+      return { ...item, count: sets.length, volume: values.reduce((sum, value, i) => sum + value * (mode === 'bodyweight' ? 1 : Number(sets[i].r) || 0), 0), maxWeight: Math.max(0, ...values) };
+    }).filter(item => item.count).reverse();
 
     // Render history list (newest first)
-    const toggleContainer = $("#exerciseHistoryToggle");
-    const historyWrapper = document.querySelector(".exercise-history-wrapper");
+    const historyRegion = $("#exerciseHistoryRegion"), historyToggle = $("#btnToggleLiftHistory");
     const historyHeader = document.querySelector(".exercise-history-header");
+    const historyCount = historyForDisplay.length;
+    const historyIsExpanded = _exerciseHistoryExpanded && !!historyCount;
+    if (historyHeader) historyHeader.style.display = 'block';
+    historyRegion.hidden = !historyIsExpanded;
+    historyToggle.disabled = !historyCount;
+    historyToggle.setAttribute?.('aria-expanded', String(historyIsExpanded));
+    historyToggle.setAttribute?.('aria-label', `${historyIsExpanded ? 'Collapse' : 'Expand'} lift history, ${historyCount} sessions in this date range`);
+    historyToggle.onclick = () => { _exerciseHistoryExpanded = !_exerciseHistoryExpanded; updateStatsChart(); };
     if (historyContainer) {
         if (historyForDisplay.length === 0) {
-            historyContainer.innerHTML = '<p class="muted" style="padding: 10px;">No history for this exercise yet.</p>';
-            if (toggleContainer) toggleContainer.innerHTML = '';
-            if (historyHeader) historyHeader.style.display = 'none';
+            historyContainer.innerHTML = '';
         } else {
-            if (historyHeader) historyHeader.style.display = 'block';
-            const showAll = _exerciseHistoryExpanded;
-            const itemsToShow = showAll ? historyForDisplay : historyForDisplay.slice(0, 3);
-            const remaining = historyForDisplay.length - 3;
+            const itemsToShow = historyForDisplay;
 
             let html = '';
             itemsToShow.forEach(h => {
                 const date = new Date(h.date);
                 const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
                 const setsHtml = h.sets.map(s => {
-                    if (s.w) {
-                        const displayW = convertWeight(parseFloat(s.w));
-                        return `<span class="set-tag">${displayW}${unit} × ${s.r}</span>`;
+                    if (ex?.type !== 'cardio' && Number(s.r) > 0) {
+                        const displayW = convertWeight(Number(s.w) || 0);
+                        const recordedMode = setMode(s);
+                        const raw = recordedMode === 'bodyweight' ? 'Bodyweight' : `${displayW}${unit}${recordedMode === 'assisted' ? ' assistance' : recordedMode === 'weighted' ? ' added' : ''}`;
+                        const estimate = recordedMode !== 'external' ? loadAPI?.estimatedLoad(s) : null;
+                        const estimateText = estimate != null ? `<small class="stat-set-estimate">Est. load ${convertWeight(estimate)}${unit}</small>` : '';
+                        return `<span class="set-tag">${raw} × ${escapeHTML(s.r)}${estimateText}</span>`;
                     }
-                    if (s.time) return `<span class="set-tag">${s.time}m / ${s.dist}${ex?.cardioMetric || 'km'}</span>`;
+                    if (Number(s.time) > 0 || Number(s.dist) > 0) return `<span class="set-tag">${escapeHTML(s.time || 0)}m / ${escapeHTML(s.dist || 0)}${escapeHTML(ex?.cardioMetric || 'km')}</span>`;
                     return '';
                 }).join('');
                 html += `<div class="ex-history-item"><div class="ex-history-date"><strong>${dateStr}</strong></div><div class="ex-history-sets">${setsHtml}</div></div>`;
             });
             historyContainer.innerHTML = html;
 
-            // Render toggle button in separate container (outside scrollable area)
-            if (toggleContainer) {
-                if (remaining > 0) {
-                    if (showAll) {
-                        toggleContainer.innerHTML = `<button class="btn-ghost small expand-history" id="btnCollapseHistory">▲ Show less</button>`;
-                    } else {
-                        toggleContainer.innerHTML = `<button class="btn-ghost small expand-history" id="btnExpandHistory">▼ + ${remaining} more sessions</button>`;
-                    }
-                } else {
-                    toggleContainer.innerHTML = '';
-                }
-
-                // Add click handlers
-                const expandBtn = $("#btnExpandHistory");
-                const collapseBtn = $("#btnCollapseHistory");
-                if (expandBtn) {
-                    expandBtn.onclick = () => {
-                        _exerciseHistoryExpanded = true;
-                        updateStatsChart();
-                    };
-                }
-                if (collapseBtn) {
-                    collapseBtn.onclick = () => {
-                        _exerciseHistoryExpanded = false;
-                        updateStatsChart();
-                    };
-                }
-            }
         }
     }
 
     // Get the data based on chart type
     const chartData = history.map(h => chartType === "maxWeight" ? h.maxWeight : h.volume);
+    if (typeof updateChartDataTable === "function") updateChartDataTable(canvas, `${ex?.name || 'Exercise'} · ${metricName} · ${metricUnit} · ${dateRange.label}`,
+      history.map((item, index) => [new Date(item.date).toLocaleDateString(), chartData[index]]));
+    canvas.setAttribute?.("role", "img");
+    canvas.setAttribute?.("aria-label", `${ex?.name || 'Exercise'}, ${metricName}, ${dateRange.error || dateRange.label}. ${history.length ? 'Tap a point for its value, or use arrow keys and Enter. Escape dismisses the value.' : 'No logged sets in this date range.'} ${assisted ? 'Higher values mean more machine assistance, not greater strength.' : ''}`);
 
     if(history.length < 2 || chartData.every(v => v === 0)) {
         ctx.clearRect(0, 0, w, h);
         ctx.font = "14px -apple-system, sans-serif";
         ctx.fillStyle = textColor;
         ctx.textAlign = "center";
-        ctx.fillText("Need more data for chart", w / 2, h / 2);
+        ctx.fillText(dateRange.error ? "Check the date range above" : !history.length ? "No logged sets in this date range" : "Need more data for chart", w / 2, h / 2);
         return;
     }
 
     const padding = { top: 20, right: 20, bottom: 40, left: 40 };
-    const chartW = w - padding.left - padding.right;
-    const chartH = h - padding.top - padding.bottom;
-
-    const dataMin = Math.min(...chartData);
-    const dataMax = Math.max(...chartData);
-
-    // Round to nearest 100 for clean Y-axis
-    const roundedMax = Math.ceil(dataMax / 100) * 100 || 100;
-    const roundedMin = Math.max(0, Math.floor(dataMin / 100) * 100 - 100);
+    const { width: chartW, height: chartH } = LiftLogChartMotion.plotGeometry(w, h, padding);
+    const { min: roundedMin, max: roundedMax } = LiftLogChartMotion.niceRange(chartData);
     const finalRange = roundedMax - roundedMin;
 
     ctx.clearRect(0, 0, w, h);
 
-    // Y axis labels - round to 100s
+    // Fit the recorded range, so small load changes remain visible.
     ctx.font = "11px -apple-system, sans-serif";
     ctx.fillStyle = textColor;
     ctx.textAlign = "right";
@@ -1937,8 +2644,8 @@ function updateStatsChart() {
     for (let i = 0; i <= numSteps; i++) {
         const val = roundedMin + (i / numSteps) * finalRange;
         const y = padding.top + chartH - (i / numSteps) * chartH;
-        ctx.fillText(formatAxisValue(val), padding.left - 8, y + 4);
-        ctx.strokeStyle = isDark ? "#333" : "#ddd";
+        ctx.fillText(val < 100 ? Number(val.toFixed(1)).toLocaleString() : formatAxisValue(val), padding.left - 8, y + 4);
+        ctx.strokeStyle = LiftLogTheme.chartColors().grid;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(padding.left, y);
@@ -1950,19 +2657,20 @@ function updateStatsChart() {
     ctx.textAlign = "center";
     ctx.fillStyle = textColor;
     const xLabelStep = Math.max(1, Math.floor(history.length / 5));
+    const xLabels = [];
     history.forEach((item, i) => {
         if (i % xLabelStep === 0 || i === history.length - 1) {
             const x = padding.left + (i / (history.length - 1)) * chartW;
             const date = new Date(item.date);
             const label = `${date.getDate()}/${date.getMonth() + 1}`;
-            ctx.fillText(label, x, h - padding.bottom + 20);
+            xLabels.push({ x, label, width: ctx.measureText?.(label)?.width ?? label.length * 6 });
         }
     });
+    LiftLogChartMotion.spacedAxisLabels(xLabels).forEach(item => ctx.fillText(item.label, item.x, h - padding.bottom + 20));
 
     // Draw line
     ctx.beginPath();
-    ctx.strokeStyle = chartType === "maxWeight" ? "#FF3333" : "#1a1a1a";
-    if (isDark && chartType !== "maxWeight") ctx.strokeStyle = "#fff";
+    ctx.strokeStyle = MUSCLE_COLORS[ex?.muscle] || MUSCLE_COLORS.Other;
     ctx.lineWidth = 3;
     chartData.forEach((val, i) => {
         const x = padding.left + (i / (chartData.length - 1)) * chartW;
@@ -1974,251 +2682,205 @@ function updateStatsChart() {
 
     // Draw dots
     ctx.fillStyle = ctx.strokeStyle;
+    ctx.strokeStyle = LiftLogTheme.chartColors().outline; ctx.lineWidth = 1.3;
     chartData.forEach((val, i) => {
         const x = padding.left + (i / (chartData.length - 1)) * chartW;
         const y = padding.top + chartH - ((val - roundedMin) / finalRange) * chartH;
         ctx.beginPath();
         ctx.arc(x, y, 5, 0, Math.PI * 2);
         ctx.fill();
+        ctx.stroke();
     });
+    updateChartInspection(canvas, chartData.map((value, i) => ({
+      x: padding.left + i / (chartData.length - 1) * chartW,
+      y: padding.top + chartH - (value - roundedMin) / finalRange * chartH,
+      label: `${new Date(history[i].date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} · ${Number(value.toFixed(2)).toLocaleString()} ${metricUnit}${assisted ? ' assistance' : ''}`
+    })));
 }
 
 // --- EXPORT / IMPORT ---
 const DATA_VERSION = 1;
 
+function csvCell(value) {
+  let text = String(value ?? "");
+  // Spreadsheet imports should treat free text as data, including leading '='.
+  if (/^[=+@\-]/.test(text)) text = "'" + text;
+  return '"' + text.replace(/"/g, '""') + '"';
+}
+function exportCSV() {
+  const rows = [["Date", "Routine", "Exercise", "Set", "Weight (kg)", "Reps", "Time (minutes)", "Distance", "Distance unit", "Workout notes", "Exercise notes", "Load type", "Bodyweight snapshot (kg)", "Bodyweight snapshot date", "Estimated load (kg)"]];
+  DB.sessions.forEach(session => (session.order || []).forEach(exId => {
+    const ex = DB.exercises[exId];
+    (session.entries[exId] || []).forEach((set, index) => rows.push([
+      LiftLogDates.localDayKey(session.start), session.templateName || "Freestyle", ex?.name || "Unknown",
+      index + 1, set.w ?? "", set.r ?? "", set.time ?? "", set.dist ?? "",
+      ex?.type === "cardio" ? ex.cardioMetric || "km" : "", session.notes || "", session.exerciseNotes?.[exId] || set.note || "",
+      ex?.type === "cardio" ? "" : LiftLogExerciseLoad.resolveSetMode(set, ex), set.bodyweightKg ?? "", set.bodyweightDate ?? "",
+      ex?.type === "cardio" ? "" : LiftLogExerciseLoad.estimatedLoad(set) ?? ""
+    ]));
+  }));
+  rows.push([], ["Bodyweight date", "Weight (kg)"]);
+  DB.bodyweight.forEach(entry => rows.push([LiftLogDates.localDayKey(entry.date), entry.kg]));
+  return rows.map(row => row.map(csvCell).join(",")).join("\r\n");
+}
 $("#btnExportCSV").addEventListener("click", () => {
-    // Workout data
-    let csv = "=== WORKOUT DATA ===\nDate,Exercise,Set,Weight/Time,Reps/Dist\n";
-    DB.sessions.forEach(s => {
-        const date = s.start.split("T")[0];
-        (s.order || []).forEach(exId => {
-            const exName = DB.exercises[exId]?.name || "Unknown";
-            (s.entries[exId] || []).forEach((set, i) => {
-                const v1 = set.w || set.time;
-                const v2 = set.r || set.dist;
-                csv += `${date},${exName},${i+1},${v1},${v2}\n`;
-            });
-        });
-    });
-
-    // Bodyweight data
-    csv += "\n=== BODYWEIGHT DATA ===\nDate,Weight (kg)\n";
-    DB.bodyweight.forEach(bw => {
-        const date = bw.date.split("T")[0];
-        csv += `${date},${bw.kg}\n`;
-    });
-
-    const blob = new Blob([csv], {type: "text/csv"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "liftlog_export.csv";
-    a.click();
+  const url = URL.createObjectURL(new Blob([exportCSV()], {type: "text/csv;charset=utf-8"}));
+  const a = document.createElement("a"); a.href = url; a.download = "liftlog_export.csv"; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
-$("#btnExportJSON").addEventListener("click", () => {
-    const exportData = {
-        version: DATA_VERSION,
-        exportedAt: new Date().toISOString(),
-        data: DB
-    };
-    const json = JSON.stringify(exportData, null, 2);
-    const blob = new Blob([json], {type: "application/json"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `liftlog_backup_${new Date().toISOString().split("T")[0]}.json`;
-    a.click();
+$("#btnExportJSON").addEventListener("click", async () => {
+  let data = DB, draft = ACTIVE_SESSION;
+  if (await flushSaves()) {
+    try {
+      // Export the complete committed snapshot, including saves from other windows.
+      const snapshot = await STORE.load(); data = snapshot.db; draft = snapshot.draft;
+    } catch (error) { storageFailure(error); }
+  }
+  downloadJSON({version: DATA_VERSION, exportedAt: new Date().toISOString(), data, draft},
+    `liftlog_backup_${LiftLogDates.localDayKey(new Date())}.json`);
+  if (STORAGE_ERROR) showNotice("Backup includes the edits in this window. Also export recovery to keep all saved copies.", "error");
 });
 
-$("#fileRestore").addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-        try {
-            const imported = JSON.parse(evt.target.result);
-
-            // Validate structure
-            let dataToRestore;
-            if (imported.version && imported.data) {
-                // New format with version
-                dataToRestore = imported.data;
-            } else if (imported.exercises && imported.sessions) {
-                // Old format (direct DB export)
-                dataToRestore = imported;
-            } else {
-                throw new Error("Invalid backup file structure");
-            }
-
-            // Validate required fields
-            if (!dataToRestore.exercises || !dataToRestore.sessions) {
-                throw new Error("Missing required data fields");
-            }
-
-            if (!confirm("This will replace all your current data. Continue?")) return;
-
-            DB = dataToRestore;
-            // Ensure all required fields exist
-            if (!DB.bodyweight) DB.bodyweight = [];
-            if (!DB.templates) DB.templates = {};
-            if (!DB.user) DB.user = { theme: "light" };
-
-            // Sort sessions by date (newest first)
-            if (DB.sessions && DB.sessions.length > 0) {
-              DB.sessions.sort((a, b) => new Date(b.start) - new Date(a.start));
-            }
-
-            saveDB();
-            migrateExerciseCategories();
-            document.body.className = `theme-${DB.user.theme}`;
-            renderCurrentTab("dashboard");
-            alert("Data restored successfully!");
-        } catch (err) {
-            alert("Error restoring backup: " + err.message);
-        }
-    };
-    reader.readAsText(file);
-    e.target.value = ""; // Reset file input
-});
+async function restoreFile(event) {
+  const file = event.target.files[0]; event.target.value = "";
+  if (!file) return;
+  try {
+    if (file.size > 50 * 1024 * 1024) throw new Error("This file is too large to be a LiftLog backup (limit 50 MB).");
+    const backup = JSON.parse(await file.text());
+    const validated = STORE.parseBackupEnvelope(backup);
+    if (STORE_READY && !await flushSaves()) return;
+    const revision = STORAGE_REVISION;
+    if (!await askConfirm("Restore backup?", `Replace current data with ${validated.db.sessions.length} workouts, ${Object.keys(validated.db.exercises).length} exercises and ${Object.keys(validated.db.templates).length} routines${validated.draft ? ", plus an unfinished workout" : ""}? A recovery copy of your current saved data will be kept on this device.`)) return;
+    COMMITTING = true; updateSaveStatus();
+    const result = await STORE.restore(backup, revision);
+    applySnapshot(result); stopTimer(); loadSettings();
+    $(".tab[data-tab='dashboard']").click();
+    showNotice(validated.draft ? "Backup restored, including your unfinished workout." : "Backup restored. Use Restore previous save in Settings to undo this restore.");
+  } catch (error) { showNotice(`Restore cancelled: ${error.message}. Your saved data was not replaced.`, "error"); }
+  finally { COMMITTING = false; updateSaveStatus(); }
+}
+$("#fileRestore").addEventListener("change", restoreFile);
+$("#recoveryRestore").addEventListener("change", restoreFile);
 
 // --- PICKER UTILS ---
 let _pickerCallback = null;
 let _pickerCancelCallback = null;
 let _pickerFilter = "All";
+let _pickerReturnFocus = null;
+let _pickerOptions = {};
+let _pickerClosing = false;
 
-function openExercisePicker(cb, cancelCb = null) {
-    _pickerCallback = cb;
-    _pickerCancelCallback = cancelCb;
-    _pickerFilter = "All";
-    $("#pickerSearch").value = "";
-    $("#pickerModal").classList.remove("hidden");
-    document.body.style.overflow = "hidden"; // Prevent background scroll
-    renderPickerTabs();
-    renderPickerList();
+function openExercisePicker(cb, cancelCb = null, options = {}) {
+  if (_pickerClosing) return;
+  _pickerCallback = cb; _pickerCancelCallback = cancelCb;
+  _pickerOptions = options;
+  _pickerReturnFocus = document.activeElement;
+  _pickerFilter = ["All", ...MUSCLE_GROUPS, "Cardio"].includes(options.filter) ? options.filter : "All";
+  $("#pickerTitle").textContent = options.title || 'SELECT EXERCISE';
+  $("#pickerFooter").hidden = options.allowCreate === false;
+  $("#pickerSearch").value = "";
+  LOGGER_SCROLL_LOCK.acquire("exercise-picker");
+  resumeExercisePicker();
+}
+
+function resumeExercisePicker() {
+  $("#pickerModal").classList.remove("hidden");
+  renderPickerTabs(); renderPickerList();
+  $("#pickerTitle").focus({preventScroll: true});
+}
+
+function closeExercisePicker(exId = null) {
+  if (_pickerClosing) return;
+  const callback = exId === null ? _pickerCancelCallback : _pickerCallback;
+  const returnFocus = _pickerReturnFocus;
+  _pickerCallback = null; _pickerCancelCallback = null; _pickerReturnFocus = null;
+  _pickerClosing = true;
+  $("#pickerModal").classList.add("hidden");
+  const finish = () => {
+    _pickerClosing = false; _pickerOptions = {};
+    LOGGER_SCROLL_LOCK.release("exercise-picker");
+    // A callback may have opened and focused another editor. Keep that focus.
+    const active = document.activeElement;
+    const focusStillInPicker = active === document.body || !active?.isConnected || !active?.getClientRects().length || $("#pickerModal").contains(active);
+    if (focusStillInPicker && returnFocus?.isConnected && returnFocus.getClientRects().length) returnFocus.focus({preventScroll: true});
+  };
+  // Preserve synchronous origins and await persistence-based handoffs.
+  try {
+    const result = callback?.(exId);
+    if (result && typeof result.then === 'function') return Promise.resolve(result).then(finish, error => {
+      finish(); showNotice(error?.message || 'Could not select this exercise.', 'error');
+    });
+    finish();
+  } catch (error) { finish(); throw error; }
 }
 
 function renderPickerTabs() {
-    const container = $("#pickerTabs");
-    container.innerHTML = "";
-
-    const allTab = document.createElement("button");
-    allTab.className = `picker-tab ${_pickerFilter === "All" ? "active" : ""}`;
-    allTab.textContent = "All";
-    allTab.onclick = () => { _pickerFilter = "All"; renderPickerTabs(); renderPickerList(); };
-    container.appendChild(allTab);
-
-    // Add muscle groups
-    MUSCLE_GROUPS.forEach(muscle => {
-        const tab = document.createElement("button");
-        tab.className = `picker-tab ${_pickerFilter === muscle ? "active" : ""}`;
-        tab.textContent = muscle;
-        const color = MUSCLE_COLORS[muscle] || "#ccc";
-        tab.style.borderColor = color;
-        if (_pickerFilter === muscle) {
-            tab.style.background = color;
-            tab.style.color = "#000";
-        }
-        tab.onclick = () => { _pickerFilter = muscle; renderPickerTabs(); renderPickerList(); };
-        container.appendChild(tab);
-    });
-
-    // Add Cardio tab (it's a type, not a muscle)
-    const cardioTab = document.createElement("button");
-    cardioTab.className = `picker-tab ${_pickerFilter === "Cardio" ? "active" : ""}`;
-    cardioTab.textContent = "Cardio";
-    const cardioColor = MUSCLE_COLORS.Cardio;
-    cardioTab.style.borderColor = cardioColor;
-    if (_pickerFilter === "Cardio") {
-        cardioTab.style.background = cardioColor;
-        cardioTab.style.color = "#000";
-    }
-    cardioTab.onclick = () => { _pickerFilter = "Cardio"; renderPickerTabs(); renderPickerList(); };
-    container.appendChild(cardioTab);
+  const container = $("#pickerTabs"); container.replaceChildren();
+  const filters = _pickerOptions.lockedFilter ? [_pickerFilter] : ["All", ...MUSCLE_GROUPS, "Cardio"];
+  filters.forEach(muscle => {
+    const tab = document.createElement("button"); tab.type = "button";
+    tab.className = `picker-tab ${_pickerFilter === muscle ? "active" : ""}`;
+    tab.textContent = muscle; tab.setAttribute("aria-pressed", String(_pickerFilter === muscle));
+    if (MUSCLE_COLORS[muscle]) tab.style.setProperty('--filter-color', MUSCLE_COLORS[muscle]);
+    tab.onclick = () => {
+      _pickerFilter = muscle;
+      // Keep the pressed button in place, including keyboard focus and horizontal scroll.
+      [...container.children].forEach(button => {
+        const active = button === tab;
+        button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
+      });
+      renderPickerList();
+    };
+    container.appendChild(tab);
+  });
 }
 
 $("#pickerSearch").addEventListener("input", renderPickerList);
-
 function renderPickerList() {
-    const q = $("#pickerSearch").value.toLowerCase();
-    const div = $("#pickerList");
-    div.innerHTML = "";
-
-    const filtered = Object.values(DB.exercises)
-        .filter(ex => {
-            // Filter by Cardio (type) or muscle group
-            if (_pickerFilter === "Cardio") {
-                if (ex.type !== "cardio") return false;
-            } else if (_pickerFilter !== "All") {
-                if (ex.muscle !== _pickerFilter) return false;
-            }
-            if (q && !ex.name.toLowerCase().includes(q)) return false;
-            return true;
-        })
-        .sort((a, b) => a.name.localeCompare(b.name));
-
-    // Check if no exercises exist at all
-    const allExercises = Object.values(DB.exercises);
-    if (allExercises.length === 0) {
-        div.innerHTML = `
-            <p class="muted" style="padding: 10px;">No exercises yet!</p>
-            <div class="picker-item picker-create-new" id="pickerGoToExercises">+ CREATE YOUR FIRST EXERCISE</div>
-        `;
-        div.querySelector("#pickerGoToExercises").onclick = () => {
-            $("#pickerModal").classList.add("hidden");
-            openNewExerciseModal();
-        };
-        return;
+  const q = $("#pickerSearch").value.trim().toLowerCase();
+  const list = $("#pickerList"); list.replaceChildren(); list.scrollTop = 0;
+  const available = Object.values(DB.exercises).filter(ex => !ex.archived && !(_pickerOptions.excludeIds || []).includes(ex.id));
+  const filtered = available.filter(ex => {
+    const category = ex.type === 'cardio' ? 'Cardio' : (ex.muscle || 'Other');
+    if (_pickerFilter !== 'All' && category !== _pickerFilter) return false;
+    return !q || ex.name.toLowerCase().includes(q);
+  }).sort((a, b) => a.name.localeCompare(b.name));
+  $("#pickerStatus").textContent = `${filtered.length} exercise${filtered.length === 1 ? '' : 's'}`;
+  if (!filtered.length) {
+    const empty = document.createElement('p'); empty.className = 'picker-empty';
+    empty.textContent = available.length ? 'No matching exercises' : 'No exercises yet'; list.appendChild(empty);
+    if (available.length && (q || (!_pickerOptions.lockedFilter && _pickerFilter !== 'All'))) {
+      const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'btn-black picker-reset'; reset.textContent = 'CLEAR FILTERS';
+      reset.onclick = () => { if (!_pickerOptions.lockedFilter) _pickerFilter = 'All'; $("#pickerSearch").value = ''; renderPickerTabs(); renderPickerList(); $("#pickerSearch").focus(); };
+      list.appendChild(reset);
     }
-
-    // Show filtered exercises
-    if (filtered.length === 0) {
-        div.innerHTML = '<p class="muted" style="padding: 10px;">No exercises match this filter</p>';
-    } else {
-        filtered.forEach(ex => {
-            const btn = document.createElement("div");
-            const colorClass = ex.type === "cardio" ? "Cardio" : (ex.muscle || 'Other');
-            btn.className = `picker-item ex-cat-${colorClass}`;
-            btn.textContent = ex.name;
-            btn.onclick = () => {
-                if(_pickerCallback) _pickerCallback(ex.id);
-                $("#pickerModal").classList.add("hidden");
-                document.body.style.overflow = ""; // Restore scroll
-            };
-            div.appendChild(btn);
-        });
-    }
-
-    // Always add option to create new exercise at the bottom
-    const createBtn = document.createElement("div");
-    createBtn.className = "picker-item picker-create-new";
-    createBtn.textContent = "+ ADD NEW EXERCISE";
-    createBtn.onclick = () => {
-        $("#pickerModal").classList.add("hidden");
-        openNewExerciseModal();
-    };
-    div.appendChild(createBtn);
+  }
+  filtered.forEach(ex => {
+    const category = ex.type === 'cardio' ? 'Cardio' : ex.muscle || 'Other';
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'picker-choice';
+    button.style.setProperty('--muscle-color', MUSCLE_COLORS[category] || MUSCLE_COLORS.Other);
+    const name = document.createElement('strong'); name.textContent = ex.name;
+    const meta = document.createElement('span'); meta.className = 'picker-choice-meta'; meta.textContent = category;
+    button.append(name, meta); button.onclick = () => closeExercisePicker(ex.id); list.appendChild(button);
+  });
 }
-
-$("#pickerClose").addEventListener("click", () => {
-  $("#pickerModal").classList.add("hidden");
-  document.body.style.overflow = ""; // Restore scroll
-  if (_pickerCancelCallback) {
-    _pickerCancelCallback();
-    _pickerCancelCallback = null;
-  }
+$("#pickerCreate").addEventListener('click', () => {
+  $("#pickerModal").classList.add('hidden');
+  openNewExerciseModal(true);
 });
-
-// Close picker modal when clicking outside
-$("#pickerModal").addEventListener("click", (e) => {
-  if (e.target === $("#pickerModal")) {
-    $("#pickerModal").classList.add("hidden");
-    document.body.style.overflow = "";
-    if (_pickerCancelCallback) {
-      _pickerCancelCallback();
-      _pickerCancelCallback = null;
-    }
-  }
+$("#pickerClose").addEventListener('click', () => closeExercisePicker());
+$("#pickerModal").addEventListener('click', event => {
+  if (event.target === $("#pickerModal")) closeExercisePicker();
+});
+$("#pickerModal").addEventListener('keydown', event => {
+  if (event.key === 'Escape') { event.preventDefault(); closeExercisePicker(); return; }
+  if (event.key !== 'Tab') return;
+  const controls = [...$("#pickerModal").querySelectorAll('button, input')].filter(node => !node.disabled && node.getClientRects().length);
+  const first = controls[0], last = controls[controls.length - 1];
+  if (!first) { event.preventDefault(); return; }
+  if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && (document.activeElement === last || !controls.includes(document.activeElement))) { event.preventDefault(); first.focus(); }
 });
 
 // Prevent scroll chaining on all overlays
@@ -2226,7 +2888,7 @@ document.querySelectorAll(".overlay").forEach(overlay => {
   overlay.addEventListener("touchmove", (e) => {
     // Only prevent if the touch is directly on the overlay (not on scrollable content inside)
     const target = e.target;
-    const isScrollable = target.closest(".drawer-body, .picker-list, .modal-box, .day-modal-box");
+    const isScrollable = target.closest(".drawer-body, .picker-box, .modal-box, .day-modal-box");
     if (!isScrollable) {
       e.preventDefault();
     }
@@ -2235,19 +2897,21 @@ document.querySelectorAll(".overlay").forEach(overlay => {
   // Prevent wheel scroll on overlay background
   overlay.addEventListener("wheel", (e) => {
     const target = e.target;
-    const isScrollable = target.closest(".drawer-body, .picker-list, .modal-box, .day-modal-box");
+    const isScrollable = target.closest(".drawer-body, .picker-box, .modal-box, .day-modal-box");
     if (!isScrollable) {
       e.preventDefault();
     }
   }, { passive: false });
 });
 
-// Theme Toggle
-$("#btnTheme").addEventListener("click", () => {
-   DB.user.theme = DB.user.theme === "light" ? "dark" : "light";
-   document.body.className = `theme-${DB.user.theme}`;
-   saveDB();
-   // Re-render charts to update colors
+// Appearance changes save only the preference; unfinished workouts remain intact.
+function setAppTheme(mode) {
+   if (!STORE_READY || STORAGE_ERROR || UPDATE_LOCK || COMMITTING) return Promise.resolve(false);
+   if (!LiftLogTheme.modes.includes(mode)) return Promise.resolve(false);
+   DB.user.theme = mode;
+   LiftLogTheme.apply(mode);
+   LiftLogRecaps.refreshArtwork();
+   // Repaint visible charts after their text, grid and bodyweight colours change.
    const activeTab = $(".tab.active")?.dataset.tab;
    if (activeTab === "stats") {
      drawBodyweightChart();
@@ -2256,6 +2920,10 @@ $("#btnTheme").addEventListener("click", () => {
    } else if (activeTab === "dashboard") {
      renderCalendar();
    }
+   return saveDB();
+}
+$("#btnTheme").addEventListener("click", () => {
+   setAppTheme(LiftLogTheme.next(DB.user.theme));
 });
 
 // Timer Toggle - Click anywhere on timer card to toggle display
@@ -2275,15 +2943,31 @@ $("#timerCard").addEventListener("click", (e) => {
   }
 });
 
-// Templates section collapsible toggle
-$("#templatesHeader").addEventListener("click", (e) => {
-  // Don't toggle if clicking the NEW button
-  if (e.target.id === "btnNewTemplate") return;
-
-  const content = $("#templatesContent");
-  const icon = $("#templatesToggle");
-  content.classList.toggle("collapsed");
-  icon.classList.toggle("collapsed");
+// Library subviews keep routine management separate from starting a workout.
+function showLibraryView(view) {
+  const routines = view === 'routines';
+  const exercisesPanel = $("#libraryExercisesPanel"), routinesPanel = $("#libraryRoutinesPanel");
+  const outgoing = routines ? exercisesPanel : routinesPanel;
+  const focusLeavesPanel = typeof document !== 'undefined' && outgoing.contains(document.activeElement);
+  $("#librarySwitch").dataset.view = routines ? 'routines' : 'exercises';
+  exercisesPanel.hidden = routines;
+  routinesPanel.hidden = !routines;
+  $("#btnLibraryExercises").setAttribute('aria-pressed', String(!routines));
+  $("#btnLibraryRoutines").setAttribute('aria-pressed', String(routines));
+  if (routines) renderTemplates(); else renderExerciseLibrary();
+  if (focusLeavesPanel) $(routines ? "#btnLibraryRoutines" : "#btnLibraryExercises").focus({preventScroll: true});
+}
+$("#btnLibraryExercises").addEventListener('click', () => showLibraryView('exercises'));
+$("#btnLibraryRoutines").addEventListener('click', () => showLibraryView('routines'));
+['exercises', 'routines'].forEach((view, index) => {
+  const button = $(index ? "#btnLibraryRoutines" : "#btnLibraryExercises");
+  button.addEventListener('keydown', event => {
+    if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const target = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : 1 - index;
+    showLibraryView(target ? 'routines' : 'exercises');
+    $(target ? "#btnLibraryRoutines" : "#btnLibraryExercises").focus({preventScroll: true});
+  });
 });
 
 // Helper to get latest bodyweight from chart data
@@ -2309,12 +2993,25 @@ window.addEventListener("resize", () => {
 
 // --- COLLAPSIBLE SECTIONS ---
 // Data section toggle in settings
-$("#dataHeader").addEventListener("click", () => {
+function setDataExpanded(expanded) {
   const content = $("#dataContent");
   const icon = $("#dataToggle");
-  content.classList.toggle("collapsed");
-  icon.classList.toggle("collapsed");
+  content.classList.toggle('collapsed', !expanded);
+  icon.classList.toggle('collapsed', !expanded);
+  content.inert = !expanded;
+  content.setAttribute('aria-hidden', String(!expanded));
+  $("#dataHeader").setAttribute('aria-expanded', String(expanded));
+}
+function toggleDataExpanded() { setDataExpanded($("#dataContent").classList.contains('collapsed')); }
+$("#dataHeader").setAttribute('role', 'button');
+$("#dataHeader").setAttribute('tabindex', '0');
+$("#dataHeader").setAttribute('aria-controls', 'dataContent');
+$("#dataHeader").addEventListener('click', toggleDataExpanded);
+$("#dataHeader").addEventListener('keydown', event => {
+  if (!['Enter', ' '].includes(event.key)) return;
+  event.preventDefault(); toggleDataExpanded();
 });
+setDataExpanded(!$("#dataContent").classList.contains('collapsed'));
 
 // --- SETTINGS TAB ---
 function renderSettings() {
@@ -2331,10 +3028,6 @@ function loadSettings() {
   const suggestionsToggle = $("#settingSuggestions");
   if (suggestionsToggle) suggestionsToggle.checked = DB.user.showSuggestions !== false;
 
-  // Set compound toggle
-  const compoundToggle = $("#settingCompound");
-  if (compoundToggle) compoundToggle.checked = DB.user.includeCompound !== false;
-
   // Set training goal
   const goalSelect = $("#settingGoal");
   if (goalSelect) goalSelect.value = DB.user.trainingGoal || "hypertrophy";
@@ -2349,32 +3042,13 @@ $("#settingUnit").addEventListener("change", (e) => {
   renderStats();
 });
 
-// Suggestions toggle
-$("#settingSuggestions").addEventListener("change", (e) => {
-  DB.user.showSuggestions = e.target.checked;
-  saveDB();
-});
-
-// Compound muscles toggle
-$("#settingCompound").addEventListener("change", (e) => {
-  DB.user.includeCompound = e.target.checked;
-  saveDB();
-  renderBreakdownChart();
-});
-
-// Training goal change
-$("#settingGoal").addEventListener("change", (e) => {
-  DB.user.trainingGoal = e.target.value;
-  saveDB();
-});
-
 // --- UNIT CONVERSION HELPERS ---
 function convertWeight(kg) {
   // Convert kg value to display unit
   if (DB.user.useLbs) {
     return parseFloat((kg * KG_TO_LBS).toFixed(1));
   }
-  return parseFloat(kg);
+  return Number(Number(kg).toFixed(2));
 }
 
 // Format Y-axis values with K abbreviation for large numbers
@@ -2392,7 +3066,7 @@ function formatWeight(kg) {
   if (DB.user.useLbs) {
     return (kg * KG_TO_LBS).toFixed(1) + " lbs";
   }
-  return kg + " kg";
+  return Number(Number(kg).toFixed(2)) + " kg";
 }
 
 function formatWeightValue(value) {
@@ -2409,27 +3083,18 @@ function getWeightUnit() {
 }
 
 // --- FACTORY RESET ---
-$("#btnFactoryReset").addEventListener("click", () => {
-  const confirmation = prompt('This will delete ALL your data permanently.\n\nType "RESET" to confirm:');
-  if (confirmation !== "RESET") {
-    if (confirmation !== null) {
-      alert('Reset cancelled. You must type "RESET" exactly to confirm.');
-    }
-    return;
-  }
-
-  // Clear everything
-  localStorage.removeItem(DB_KEY);
-  DB = JSON.parse(JSON.stringify(DEFAULT_DB));
-  saveDB();
-
-  // Reset UI
-  document.body.className = "theme-light";
-  ACTIVE_SESSION = null;
-  stopTimer();
-
-  alert("All data has been reset.");
-  renderCurrentTab("dashboard");
+$("#btnFactoryReset").addEventListener("click", async () => {
+  if (!await flushSaves()) return;
+  const revision = STORAGE_REVISION;
+  const confirmation = await askText("Reset LiftLog?", 'Remove all current workouts, exercises and routines? A recovery copy will be kept. Type RESET to confirm.');
+  if (confirmation !== "RESET") return;
+  try {
+    COMMITTING = true; updateSaveStatus();
+    applySnapshot(await STORE.reset(revision)); stopTimer();
+    $(".tab[data-tab='dashboard']").click();
+    showNotice("LiftLog reset. Use Restore previous save in Settings to undo this reset.");
+  } catch (error) { storageFailure(error); }
+  finally { COMMITTING = false; updateSaveStatus(); }
 });
 
 // --- WORKOUT NOTES ---
@@ -2437,6 +3102,7 @@ $("#btnFactoryReset").addEventListener("click", () => {
 $("#workoutNotes").addEventListener("input", (e) => {
   if (ACTIVE_SESSION) {
     ACTIVE_SESSION.notes = e.target.value;
+    saveDraft();
   }
 });
 
@@ -2453,139 +3119,29 @@ $("#statChartType").addEventListener("change", () => {
   updateStatsChart();
 });
 
-// --- COMPOUND EXERCISES ---
-// Toggle secondary muscles visibility
-$("#newExCompound").addEventListener("change", (e) => {
-  const wrapper = $("#secondaryMusclesWrapper");
-  if (e.target.checked) {
-    wrapper.classList.remove("hidden");
-    renderSecondaryMusclesList();
-  } else {
-    wrapper.classList.add("hidden");
-  }
-});
-
-let _selectedSecondaryMuscles = [];
-
-function renderSecondaryMusclesList() {
-  const container = $("#secondaryMusclesList");
-  container.innerHTML = "";
-
-  const primaryMuscle = $("#newExMuscle").value;
-
-  MUSCLE_GROUPS.forEach(muscle => {
-    // Don't show primary muscle as secondary option
-    if (muscle === primaryMuscle) return;
-
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = `secondary-muscle-chip ${_selectedSecondaryMuscles.includes(muscle) ? "selected" : ""}`;
-    chip.textContent = muscle;
-    chip.onclick = () => {
-      if (_selectedSecondaryMuscles.includes(muscle)) {
-        _selectedSecondaryMuscles = _selectedSecondaryMuscles.filter(m => m !== muscle);
-      } else {
-        _selectedSecondaryMuscles.push(muscle);
-      }
-      renderSecondaryMusclesList();
-    };
-    container.appendChild(chip);
-  });
-}
-
-// Update secondary muscles when primary changes
-$("#newExMuscle").addEventListener("change", () => {
-  if ($("#newExCompound").checked) {
-    // Remove primary from secondary if it was selected
-    const primary = $("#newExMuscle").value;
-    _selectedSecondaryMuscles = _selectedSecondaryMuscles.filter(m => m !== primary);
-    renderSecondaryMusclesList();
-  }
-});
-
 // --- BREAKDOWN CHART ---
 let _breakdownOffset = 0; // 0 = current period, -1 = previous, etc.
 let _hiddenMuscles = new Set(); // Muscles hidden from chart
-let _exerciseHistoryExpanded = false; // Whether to show all exercise history
+let _exerciseHistoryExpanded = false; // Lift History starts collapsed.
 
 function getBreakdownPeriodInfo() {
   const period = $("#breakdownPeriod").value;
   const granularity = $("#breakdownGranularity").value;
-  const now = new Date();
-  let startDate, endDate, labels = [], labelText;
-
-  if (period === "week") {
-    // Start of week (Sunday) offset by _breakdownOffset weeks
-    const currentWeekStart = new Date(now);
-    currentWeekStart.setDate(now.getDate() - now.getDay() + (_breakdownOffset * 7));
-    startDate = new Date(currentWeekStart);
-    endDate = new Date(startDate);
-    endDate.setDate(startDate.getDate() + 6);
-
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(startDate);
-      d.setDate(startDate.getDate() + i);
-      labels.push(DAYS[d.getDay()]);
-    }
-
-    if (_breakdownOffset === 0) {
-      labelText = "This Week";
-    } else {
-      const weekStart = startDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-      const weekEnd = endDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-      labelText = `${weekStart} - ${weekEnd}`;
-    }
-
-  } else if (period === "month") {
-    const targetMonth = new Date(now.getFullYear(), now.getMonth() + _breakdownOffset, 1);
-    startDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth(), 1);
-    endDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth() + 1, 0);
-
-    const monthNames = ["January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December"];
-    labelText = `${monthNames[targetMonth.getMonth()]} ${targetMonth.getFullYear()}`;
-
-    if (granularity === "weekly") {
-      // Group by weeks within the month
-      labels = ["Wk 1", "Wk 2", "Wk 3", "Wk 4", "Wk 5"];
-    } else {
-      // Daily view
-      const daysInMonth = endDate.getDate();
-      for (let i = 1; i <= daysInMonth; i++) {
-        labels.push(i.toString());
-      }
-    }
-
-  } else { // year
-    const targetYear = now.getFullYear() + _breakdownOffset;
-    startDate = new Date(targetYear, 0, 1);
-    endDate = new Date(targetYear, 11, 31);
-    labelText = targetYear.toString();
-
-    if (granularity === "weekly") {
-      // 52 weeks in a year
-      for (let i = 1; i <= 52; i++) {
-        labels.push(i.toString());
-      }
-    } else {
-      // Monthly view (default)
-      labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    }
-  }
-
-  return { startDate, endDate, labels, labelText, period, granularity };
+  return LiftLogDates.periodInfo(period, granularity, _breakdownOffset);
 }
 
 function renderBreakdownChart() {
   const canvas = $("#breakdownChart");
   if (!canvas) return;
+  const chartBounds = canvas.getBoundingClientRect();
+  if (chartBounds.width <= 0 || chartBounds.height <= 0) return;
 
   const { startDate, endDate, labels, labelText, period, granularity } = getBreakdownPeriodInfo();
   $("#breakdownPeriodLabel").textContent = labelText;
 
   const mode = $("#breakdownMode").value; // "volume" or "sets"
   const isDark = document.body.classList.contains("theme-dark");
-  const textColor = isDark ? "#fff" : "#000";
+  const textColor = LiftLogTheme.chartColors().ink;
 
   // Set up high-DPI canvas
   const dpr = window.devicePixelRatio || 1;
@@ -2598,12 +3154,16 @@ function renderBreakdownChart() {
   const h = rect.height;
 
   // Get relevant sessions
-  const sessions = DB.sessions.filter(s => {
-    const d = new Date(s.start);
-    return d >= startDate && d <= endDate;
-  });
+  const sessions = DB.sessions.filter(s => LiftLogDates.inPeriod(s.start, startDate, endDate));
 
   if (sessions.length === 0) {
+    if (typeof updateChartInspection === "function") updateChartInspection(canvas, []);
+    if (typeof _chartAnimator !== "undefined") _chartAnimator.cancel(canvas, true);
+    delete canvas._liftlogBarSignature;
+    canvas.setAttribute?.("aria-label", `Workout breakdown, ${labelText}. No workouts in this period.`);
+    if (canvas.dataset) canvas.dataset.chartAnimating = "false";
+    const table = document.getElementById?.("breakdownDataSummary");
+    if (table) table.hidden = true;
     ctx.clearRect(0, 0, w, h);
     ctx.font = "14px -apple-system, sans-serif";
     ctx.fillStyle = textColor;
@@ -2625,10 +3185,12 @@ function renderBreakdownChart() {
   // Calculate data based on mode
   sessions.forEach(s => {
     const sessionDate = new Date(s.start);
-    let idx = getBreakdownIndex(sessionDate, startDate, period, labels.length, granularity);
+    const idx = getBreakdownIndex(sessionDate, startDate, period, labels.length, granularity);
+    if (idx < 0) return;
 
-    Object.entries(s.entries || {}).forEach(([exId, sets]) => {
+    Object.entries(s.entries || {}).forEach(([exId, recordedSets]) => {
       const ex = DB.exercises[exId];
+      const sets = LiftLogDates.completedSets(recordedSets, ex);
       if (!ex || !sets || sets.length === 0) return;
 
       if (ex.type === "cardio") {
@@ -2639,12 +3201,14 @@ function renderBreakdownChart() {
         return;
       }
 
-      const muscle = ex.muscle || "Other";
+      const muscle = allGroups.includes(ex.muscle) ? ex.muscle : "Other";
 
       if (mode === "volume") {
         // Volume = weight × reps
         let volume = 0;
         sets.forEach(set => {
+          const loadMode = typeof LiftLogExerciseLoad !== 'undefined' ? LiftLogExerciseLoad.resolveSetMode(set, ex) : set.loadType || (ex.isAssisted ? 'assisted' : 'external');
+          if (loadMode === 'bodyweight') return;
           if (set.w && set.r) {
             volume += convertWeight(parseFloat(set.w)) * parseInt(set.r);
           }
@@ -2653,28 +3217,10 @@ function renderBreakdownChart() {
         if (!_hiddenMuscles.has(muscle)) {
           muscleData[muscle][idx] += volume;
         }
-
-        // Secondary muscles get 50% credit if enabled
-        if (DB.user.includeCompound && ex.isCompound && ex.secondaryMuscles) {
-          ex.secondaryMuscles.forEach(secMuscle => {
-            if (!_hiddenMuscles.has(secMuscle)) {
-              muscleData[secMuscle][idx] += volume * 0.5;
-            }
-          });
-        }
       } else {
         // Sets mode - count number of sets
         if (!_hiddenMuscles.has(muscle)) {
           muscleData[muscle][idx] += sets.length;
-        }
-
-        // Secondary muscles get credited with sets too if enabled
-        if (DB.user.includeCompound && ex.isCompound && ex.secondaryMuscles) {
-          ex.secondaryMuscles.forEach(secMuscle => {
-            if (!_hiddenMuscles.has(secMuscle)) {
-              muscleData[secMuscle][idx] += sets.length;
-            }
-          });
         }
       }
     });
@@ -2686,6 +3232,7 @@ function renderBreakdownChart() {
 
   // Render clickable legend styled like tabs
   const legendContainer = $("#breakdownLegend");
+  const focusedLegend = legendContainer.contains?.(document.activeElement) ? document.activeElement.textContent : null;
   legendContainer.innerHTML = "";
 
   // Add "All" button first
@@ -2693,6 +3240,7 @@ function renderBreakdownChart() {
   const allSelected = _hiddenMuscles.size === 0;
   allBtn.className = `legend-tab ${allSelected ? "active" : "inactive"}`;
   allBtn.textContent = "All";
+  allBtn.setAttribute?.("aria-pressed", String(allSelected));
   allBtn.style.borderColor = isDark ? "#fff" : "#000";
   if (allSelected) {
     allBtn.style.background = isDark ? "#fff" : "#000";
@@ -2723,14 +3271,14 @@ function renderBreakdownChart() {
     const tab = document.createElement("button");
     tab.className = `legend-tab ${isHidden ? "inactive" : "active"}`;
     tab.textContent = muscle;
-    tab.style.borderColor = color;
+    tab.setAttribute?.("aria-pressed", String(!isHidden));
+    tab.style.borderColor = isDark ? "#fff" : "#111";
     if (!isHidden) {
       tab.style.background = color;
       tab.style.color = "#000";
     } else {
       // For inactive state in dark mode
       if (isDark) {
-        tab.style.borderColor = color;
         tab.style.color = "#fff";
       }
     }
@@ -2745,30 +3293,19 @@ function renderBreakdownChart() {
     legendContainer.appendChild(tab);
   });
 
-  // Clear cardio summary since it's now in the chart
-  $("#breakdownCardio").innerHTML = "";
+  if (focusedLegend) {
+    [...legendContainer.querySelectorAll("button")].find(button => button.textContent === focusedLegend)?.focus({ preventScroll: true });
+  }
+
+  // Assistance remains the raw logged machine load; do not invent historical net loads.
+  const hasSpecialLoad = mode === "volume" && sessions.some(session => Object.entries(session.entries || {}).some(([id, sets]) =>
+    LiftLogDates.completedSets(sets, DB.exercises[id]).some(set =>
+      (typeof LiftLogExerciseLoad !== 'undefined' ? LiftLogExerciseLoad.resolveSetMode(set, DB.exercises[id]) : set.loadType || (DB.exercises[id]?.isAssisted ? 'assisted' : 'external')) !== 'external')));
+  $("#breakdownCardio").textContent = hasSpecialLoad ? "Raw weight × reps, including assistance and added weight. Bodyweight estimates stay separate." : "";
 }
 
 function getBreakdownIndex(date, startDate, period, maxLabels, granularity = "daily") {
-  if (period === "week") {
-    const diff = Math.floor((date - startDate) / (1000 * 60 * 60 * 24));
-    return Math.max(0, Math.min(6, diff));
-  } else if (period === "month") {
-    if (granularity === "weekly") {
-      // Get week number within month (0-4)
-      const dayOfMonth = date.getDate();
-      return Math.min(Math.floor((dayOfMonth - 1) / 7), 4);
-    }
-    return Math.min(date.getDate() - 1, maxLabels - 1);
-  } else { // year
-    if (granularity === "weekly") {
-      // Get week number within year (0-51)
-      const startOfYear = new Date(date.getFullYear(), 0, 1);
-      const dayOfYear = Math.floor((date - startOfYear) / (1000 * 60 * 60 * 24));
-      return Math.min(Math.floor(dayOfYear / 7), 51);
-    }
-    return date.getMonth();
-  }
+  return LiftLogDates.breakdownIndex(date, startDate, period, maxLabels, granularity);
 }
 
 function drawHiResBarChart(ctx, w, h, labels, values, color, textColor, isDark) {
@@ -2795,7 +3332,7 @@ function drawHiResBarChart(ctx, w, h, labels, values, color, textColor, isDark) 
     const val = (roundedMax / steps) * i;
     const y = padding.top + chartH - (i / steps) * chartH;
     ctx.fillText(formatAxisValue(val), padding.left - 8, y + 4);
-    ctx.strokeStyle = isDark ? "#333" : "#ddd";
+    ctx.strokeStyle = LiftLogTheme.chartColors().grid;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(padding.left, y);
@@ -2816,81 +3353,101 @@ function drawHiResBarChart(ctx, w, h, labels, values, color, textColor, isDark) 
   ctx.textAlign = "center";
   ctx.fillStyle = textColor;
   const step = labels.length > 15 ? Math.ceil(labels.length / 8) : 1;
-  labels.forEach((label, i) => {
-    if (i % step === 0) {
-      const x = padding.left + gap + barWidth / 2 + i * (chartW / labels.length);
-      ctx.fillText(label, x, h - padding.bottom + 15);
-    }
+  const xLabels = labels.flatMap((label, i) => i % step === 0 || i === labels.length - 1 ? [{
+    x: padding.left + gap + barWidth / 2 + i * (chartW / labels.length), label,
+    width: ctx.measureText?.(label)?.width ?? label.length * 6
+  }] : []);
+  LiftLogChartMotion.spacedAxisLabels(xLabels).forEach(item => ctx.fillText(item.label, item.x, h - padding.bottom + 15));
+}
+
+function updateBreakdownDataSummary(canvas, labels, muscleData, groups, totals) {
+  canvas.setAttribute("role", "img");
+  const mode = $("#breakdownMode").value;
+  const label = $("#breakdownPeriodLabel").textContent;
+  const unit = mode === "sets" ? "sets" : `${getWeightUnit()} × reps`;
+  canvas.setAttribute("aria-label", `Workout breakdown, ${label}, ${unit}. Tap a bar for its values, or use arrow keys and Enter. Escape dismisses the values. A data table follows the chart for screen readers.`);
+  let details = document.getElementById("breakdownDataSummary");
+  if (!details) {
+    details = document.createElement("div"); details.id = "breakdownDataSummary"; details.className = "chart-sr-only";
+    const body = document.createElement("div"); body.className = "chart-data-scroll";
+    details.append(body); canvas.parentElement.insertAdjacentElement("afterend", details);
+  }
+  details.hidden = false;
+  const body = details.querySelector(".chart-data-scroll");
+  const table = document.createElement("table");
+  const caption = document.createElement("caption");
+  caption.textContent = `${label} · ${unit} · primary muscle`;
+  table.appendChild(caption);
+  const visibleGroups = groups.filter(group => !_hiddenMuscles.has(group) && labels.some((_, i) => (muscleData[group]?.[i] || 0) > 0));
+  const head = document.createElement("thead"), headRow = document.createElement("tr");
+  ["Period", ...visibleGroups, "Total"].forEach(text => { const cell = document.createElement("th"); cell.scope = "col"; cell.textContent = text; headRow.appendChild(cell); });
+  head.appendChild(headRow); table.appendChild(head);
+  const rows = document.createElement("tbody");
+  labels.forEach((day, i) => {
+    const row = document.createElement("tr"), title = document.createElement("th"); title.scope = "row"; title.textContent = day; row.appendChild(title);
+    [...visibleGroups.map(group => muscleData[group]?.[i] || 0), totals[i]].forEach(value => { const cell = document.createElement("td"); cell.textContent = Number(value.toFixed(2)).toLocaleString(); row.appendChild(cell); });
+    rows.appendChild(row);
   });
+  table.appendChild(rows); body.replaceChildren(table);
 }
 
 function drawHiResStackedBarChart(ctx, w, h, labels, muscleData, groups, textColor, isDark, roundTo = 100) {
+  const canvas = ctx.canvas || $("#breakdownChart");
   const padding = { top: 20, right: 20, bottom: 40, left: 40 };
-  const chartW = w - padding.left - padding.right;
-  const chartH = h - padding.top - padding.bottom;
-
-  ctx.clearRect(0, 0, w, h);
-
-  // Calculate max stacked value (excluding hidden muscles)
-  const totals = labels.map((_, i) => {
-    return groups.reduce((sum, muscle) => {
-      if (_hiddenMuscles.has(muscle)) return sum;
-      return sum + (muscleData[muscle]?.[i] || 0);
-    }, 0);
-  });
-  const maxVal = Math.max(...totals) || roundTo;
-  // Round max to specified value (100 for volume, 10 for sets)
-  const roundedMax = Math.ceil(maxVal / roundTo) * roundTo || roundTo;
-
-  const barWidth = chartW / labels.length * 0.7;
-  const gap = chartW / labels.length * 0.15;
-
-  // Y axis
-  ctx.font = "11px -apple-system, sans-serif";
-  ctx.fillStyle = textColor;
-  ctx.textAlign = "right";
-
-  const steps = 5;
-  for (let i = 0; i <= steps; i++) {
-    const val = (roundedMax / steps) * i;
-    const y = padding.top + chartH - (i / steps) * chartH;
-    ctx.fillText(formatAxisValue(val), padding.left - 8, y + 4);
-    ctx.strokeStyle = isDark ? "#333" : "#ddd";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(padding.left, y);
-    ctx.lineTo(w - padding.right, y);
-    ctx.stroke();
-  }
-
-  // Stacked bars
-  labels.forEach((_, i) => {
-    const x = padding.left + gap + i * (chartW / labels.length);
-    let currentY = padding.top + chartH;
-
-    groups.forEach(muscle => {
-      if (_hiddenMuscles.has(muscle)) return;
-      const val = muscleData[muscle]?.[i] || 0;
-      if (val === 0) return;
-
-      const color = MUSCLE_COLORS[muscle] || "#999";
-      const barH = (val / roundedMax) * chartH;
-      ctx.fillStyle = color;
-      ctx.fillRect(x, currentY - barH, barWidth, barH);
-      currentY -= barH;
-    });
-  });
-
-  // X labels
-  ctx.textAlign = "center";
-  ctx.fillStyle = textColor;
-  const step = labels.length > 15 ? Math.ceil(labels.length / 8) : 1;
-  labels.forEach((label, i) => {
-    if (i % step === 0) {
-      const x = padding.left + gap + barWidth / 2 + i * (chartW / labels.length);
-      ctx.fillText(label, x, h - padding.bottom + 15);
+  const { width: chartW, height: chartH } = LiftLogChartMotion.plotGeometry(w, h, padding);
+  const totals = labels.map((_, i) => groups.reduce((sum, muscle) => sum + (_hiddenMuscles.has(muscle) ? 0 : muscleData[muscle]?.[i] || 0), 0));
+  const roundedMax = Math.ceil((Math.max(...totals) || roundTo) / roundTo) * roundTo || roundTo;
+  const barWidth = chartW / labels.length * 0.7, gap = chartW / labels.length * 0.15;
+  const target = labels.flatMap((label, index) => groups.map(muscle => ({
+    key: `${index}:${muscle}`, delayIndex: index,
+    value: (_hiddenMuscles.has(muscle) ? 0 : muscleData[muscle]?.[index] || 0) / roundedMax * chartH
+  })));
+  updateBreakdownDataSummary(canvas, labels, muscleData, groups, totals);
+  const unit = $("#breakdownMode").value === "sets" ? "sets" : `${getWeightUnit()} × reps`;
+  updateChartInspection(canvas, labels.map((label, i) => ({
+    x: padding.left + gap + i * chartW / labels.length, y: padding.top + chartH - totals[i] / roundedMax * chartH,
+    width: barWidth, height: totals[i] / roundedMax * chartH,
+    label: `${label} · ${Number(totals[i].toFixed(2)).toLocaleString()} ${unit}\n${groups.filter(group => !_hiddenMuscles.has(group) && muscleData[group]?.[i] > 0).map(group => `${group} ${Number(muscleData[group][i].toFixed(2)).toLocaleString()}`).join(' · ')}`
+  })).filter(item => item.height > 0));
+  // Period structure changes get a short entrance. Legend/filter updates keep
+  // the currently drawn stack and transition directly to the latest values.
+  const signature = labels.join("|");
+  const entrance = canvas._liftlogBarSignature !== signature;
+  canvas._liftlogBarSignature = signature;
+  _chartAnimator.animate(canvas, target, (heights, finished) => {
+    canvas.dataset.chartAnimating = String(!finished);
+    ctx.clearRect(0, 0, w, h);
+    ctx.font = "11px -apple-system, sans-serif"; ctx.fillStyle = textColor; ctx.textAlign = "right";
+    for (let i = 0; i <= 5; i++) {
+      const y = padding.top + chartH - i / 5 * chartH;
+      ctx.fillText(formatAxisValue(roundedMax / 5 * i), padding.left - 8, y + 4);
+      ctx.strokeStyle = LiftLogTheme.chartColors().grid; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(w - padding.right, y); ctx.stroke();
     }
-  });
+    labels.forEach((_, i) => {
+      const x = padding.left + gap + i * chartW / labels.length;
+      let currentY = padding.top + chartH;
+      const stack = heights.slice(i * groups.length, (i + 1) * groups.length);
+      const topGroup = stack.findLastIndex(height => height > 0.01);
+      groups.forEach((muscle, groupIndex) => {
+        const height = stack[groupIndex];
+        if (height <= 0.01) return;
+        ctx.fillStyle = MUSCLE_COLORS[muscle] || "#999";
+        if (groupIndex === topGroup && typeof ctx.roundRect === "function") {
+          const radius = Math.min(5, barWidth / 2, height / 2);
+          ctx.beginPath(); ctx.roundRect(x, currentY - height, barWidth, height, [radius, radius, 0, 0]); ctx.fill();
+        } else { ctx.fillRect(x, currentY - height, barWidth, height); }
+        currentY -= height;
+      });
+    });
+    ctx.textAlign = "center"; ctx.fillStyle = textColor;
+    const step = labels.length > 15 ? Math.ceil(labels.length / 8) : 1;
+    const xLabels = labels.flatMap((label, i) => i % step === 0 || i === labels.length - 1 ? [{
+      x: padding.left + gap + barWidth / 2 + i * chartW / labels.length, label,
+      width: ctx.measureText?.(label)?.width ?? label.length * 6
+    }] : []);
+    LiftLogChartMotion.spacedAxisLabels(xLabels).forEach(item => ctx.fillText(item.label, item.x, h - padding.bottom + 15));
+  }, { cascade: entrance, reset: entrance, duration: 380, stagger: 24 });
 }
 
 // Breakdown chart controls
@@ -2932,8 +3489,226 @@ $("#btnNextBreakdown").addEventListener("click", () => {
   renderBreakdownChart();
 });
 
-// Initialization
-migrateExerciseCategories();
-populateSelects();
-loadSettings();
-renderCurrentTab("dashboard");
+// Startup waits for a validated, durable store before enabling editing.
+async function initializeApp() {
+  // Editor choices are static and must also exist after recovering a corrupt store.
+  populateSelects();
+  try {
+    applySnapshot(await STORE.open(DEFAULT_DB));
+    loadSettings(); migrateExerciseCategories();
+    let initialTab = "dashboard";
+    try {
+      const returnTab = sessionStorage.getItem("liftlog_update_tab");
+      sessionStorage.removeItem("liftlog_update_tab");
+      if (["dashboard", "workout", "exercises", "history", "stats", "settings"].includes(returnTab)) initialTab = returnTab;
+    } catch (_) {}
+    $(`.tab[data-tab='${initialTab}']`).click();
+    updateOfflineStatus();
+  } catch (error) { storageFailure(error); }
+  LiftLogUpdates.configure({
+    canReload: canUpdate,
+    prepareForUpdate: async () => {
+      if (!canUpdate()) return false;
+      clearActiveDrag();
+      UPDATE_LOCK = true; updateSaveStatus();
+      try { sessionStorage.setItem("liftlog_update_tab", $(".tab.active").dataset.tab); } catch (_) {}
+      return canUpdate();
+    },
+    cancelUpdate: () => {
+      UPDATE_LOCK = false; updateSaveStatus();
+      try { sessionStorage.removeItem("liftlog_update_tab"); } catch (_) {}
+    },
+    onStatus: receiveOfflineStatus
+  });
+}
+// Offline app installation is independent of workout saves.
+let OFFLINE_SETUP = {state: "checking", stage: "checking", offlineReady: false};
+let OFFLINE_STARTED_AT = 0, OFFLINE_CLOCK = null;
+function receiveOfflineStatus(status) {
+  if (status.state === "checking" && OFFLINE_SETUP.state !== "checking") OFFLINE_STARTED_AT = Date.now();
+  if (!OFFLINE_STARTED_AT) OFFLINE_STARTED_AT = Date.now();
+  OFFLINE_SETUP = {...status};
+  const notice = $("#updateStatus");
+  const failed = ["failed", "error", "unavailable"].includes(status.state) && !status.offlineReady;
+  const visible = ["waiting", "updating"].includes(status.state) || failed;
+  notice.textContent = failed ? "Offline setup needs attention. Open Settings to retry." : visible ? status.detail : "";
+  notice.hidden = !visible;
+  updateReliabilityStrip();
+  const busy = ["checking", "downloading", "caching", "verifying", "activating"].includes(status.stage) && !["failed", "deferred", "offline", "unavailable", "waiting", "current"].includes(status.state);
+  if (busy && !OFFLINE_CLOCK) OFFLINE_CLOCK = setInterval(updateOfflineStatus, 1000);
+  if (!busy && OFFLINE_CLOCK) { clearInterval(OFFLINE_CLOCK); OFFLINE_CLOCK = null; }
+  updateOfflineStatus();
+}
+function updateOfflineStatus() {
+  const status = OFFLINE_SETUP;
+  const offline = !navigator.onLine;
+  const ready = status.offlineReady === true;
+  const failed = ["failed", "error", "deferred", "offline", "unavailable"].includes(status.state);
+  const waiting = status.state === "waiting";
+  const busy = !failed && !waiting && status.state !== "current";
+  const title = $("#offlineStatus"), detail = $("#offlineProgressDetail"), progress = $("#offlineProgress"), retry = $("#btnRetryOffline");
+  $("#offlineHelp").hidden = ready;
+  if (ready && offline) title.textContent = "Offline app ready. You can log without an internet connection.";
+  else if (ready && failed) title.textContent = "Offline app ready. The latest update could not be downloaded.";
+  else if (waiting) title.textContent = ready ? "Offline app ready. An update will open after your workout and edits are finished." : "Download complete. Finish your current workout and any open edits, then close other LiftLog windows to complete setup.";
+  else if (offline) title.textContent = "Offline access is not ready. Reconnect to finish the download.";
+  else if (failed) {
+    const reasons = {storage: "There was not enough available browser storage, or the browser could not save the app.", timeout: "The download took too long.", network: "The download was interrupted.", http: "The app server could not provide an app file.", mime: "An app file could not be verified.", hash: "The app changed during download.", registration: "The browser could not start offline setup.", control: "The downloaded app could not take over this window.", unsupported: "This browser cannot install offline access here."};
+    title.textContent = "Offline access is not ready. " + (reasons[status.errorCode] || "The app download did not finish.");
+  } else if (ready && status.state === "current") title.textContent = "Offline app ready.";
+  else {
+    const stages = {checking: "Checking the app files…", downloading: "Downloading the app…", caching: "Saving the app for offline use…", verifying: "Verifying the offline app…", activating: "Finishing offline setup…", ready: "Offline app ready."};
+    title.textContent = stages[status.stage] || "Preparing offline access…";
+  }
+  progress.hidden = !busy || offline;
+  const count = Number.isFinite(status.completed) && Number.isFinite(status.total) && status.total > 0;
+  if (count) { progress.max = status.total; progress.value = Math.min(status.completed, status.total); }
+  else progress.removeAttribute("value");
+  const parts = [];
+  if (busy && !offline) {
+    if (count) parts.push(`${status.completed} of ${status.total} files in this step`);
+    if (Number.isFinite(status.bytes) && status.bytes > 0) parts.push(`${Math.round(status.bytes / 1024)} KB received`);
+    if (OFFLINE_STARTED_AT) parts.push(`${Math.max(0, Math.floor((Date.now() - OFFLINE_STARTED_AT) / 1000))} seconds elapsed`);
+  } else if (failed && !offline) parts.push("Offline setup does not change your workout entries. Retry while online.");
+  detail.textContent = parts.join(" · "); detail.hidden = !detail.textContent;
+  retry.hidden = !failed && !(!ready && !busy && !waiting);
+  retry.disabled = offline || status.retryable === false;
+}
+$("#btnRetryOffline").addEventListener("click", () => { void LiftLogUpdates.check(); });
+STORE.subscribe(() => {
+  EXTERNAL_CHANGE = true;
+  refreshSavedData();
+});
+$("#btnExportRecovery").addEventListener("click", async () => {
+  try {
+    const recovery = await STORE.exportRecovery();
+    recovery.unsaved = {version: 1, data: DB, draft: ACTIVE_SESSION};
+    downloadJSON(recovery, `liftlog_recovery_${Date.now()}.json`);
+    showNotice("Recovery exported with saved copies and the edits still in this window.");
+  } catch (error) { showNotice(`Recovery export failed: ${error.message}`, "error"); }
+});
+// Also expose recovery when there is no storage error, for restore/reset rollback.
+const recoveryButton = document.createElement("button");
+recoveryButton.className = "btn-white full mt-2"; recoveryButton.textContent = "EXPORT RECOVERY";
+recoveryButton.addEventListener("click", () => $("#btnExportRecovery").click());
+$("#dataContent").appendChild(recoveryButton);
+// Restore/reset rollback is available without downloading or editing recovery JSON.
+const previousSaveButton = document.createElement("button");
+previousSaveButton.id = "btnRestorePreviousSave";
+previousSaveButton.className = "btn-white full mt-2";
+previousSaveButton.textContent = "RESTORE PREVIOUS SAVE";
+let RESTORING_PREVIOUS_SAVE = false;
+previousSaveButton.addEventListener("click", async () => {
+  if (RESTORING_PREVIOUS_SAVE || COMMITTING) return;
+  RESTORING_PREVIOUS_SAVE = true; previousSaveButton.disabled = true;
+  let committed = false, ownsCommitLock = false;
+  try {
+    if (!await flushSaves()) return;
+    const revision = STORAGE_REVISION;
+    const recovery = await STORE.exportRecovery();
+    const records = (recovery.recovery || []).slice().reverse();
+    const previous = records.find(item => item.kind === "before-restore" && item.state);
+    const migration = records.find(item => item.kind === "legacy-migration" && item.raw);
+    const originalRaw = migration ? migration.raw : recovery.legacyRaw;
+    if (!previous && !originalRaw) {
+      showNotice("No previous save is available yet. LiftLog keeps a recovery copy before you restore a backup or reset your data.");
+      return;
+    }
+    const backup = previous ? { version: 1, data: previous.state.db, draft: previous.state.draft || null } : JSON.parse(originalRaw);
+    const validated = STORE.parseBackupEnvelope(backup);
+    const savedAt = previous && Number.isFinite(Date.parse(previous.at)) ? new Date(previous.at).toLocaleString("en-GB") : null;
+    const source = previous ? `the copy kept before your restore or reset${savedAt ? ` on ${savedAt}` : ""}` : "your original data from before the storage upgrade";
+    if (!await askConfirm("Restore previous save?", `Replace current data with ${source}: ${validated.db.sessions.length} workouts, ${Object.keys(validated.db.exercises).length} exercises and ${Object.keys(validated.db.templates).length} routines${validated.draft ? ", plus an unfinished workout" : ""}? Your current saved data will be kept as another recovery copy, so you can reverse this action.`)) return;
+    COMMITTING = true; ownsCommitLock = true; updateSaveStatus();
+    const result = await STORE.restore(backup, revision);
+    committed = true;
+    applySnapshot(result); stopTimer(); loadSettings();
+    $(".tab[data-tab='dashboard']").click();
+    showNotice(validated.draft ? "Previous save restored, including your unfinished workout. Your newer data is kept in recovery." : "Previous save restored. Your newer data is kept in recovery; Restore previous save can bring it back.");
+  } catch (error) {
+    showNotice(committed ? `Your previous save was restored, but the screen could not refresh. Reload LiftLog. ${error.message}` : `Previous save was not restored: ${error.message} Your saved data has not been replaced.`, "error");
+  } finally {
+    if (ownsCommitLock) COMMITTING = false;
+    RESTORING_PREVIOUS_SAVE = false; previousSaveButton.disabled = false; updateSaveStatus();
+    LiftLogUpdates.notifySafe();
+  }
+});
+$("#dataContent").appendChild(previousSaveButton);
+// End restore/reset rollback controls.
+const dataActions = document.createElement('div');
+dataActions.id = 'dataActions';
+while ($("#dataContent").firstChild) dataActions.appendChild($("#dataContent").firstChild);
+$("#dataContent").appendChild(dataActions);
+$("#btnRetrySave").addEventListener("click", async () => {
+  if (!STORE_READY) { await initializeApp(); return; }
+  await SAVE_QUEUE;
+  STORAGE_ERROR = null; QUEUED_DB = copyState(BASE_DB); QUEUED_DRAFT = copyState(BASE_DRAFT);
+  updateSaveStatus();
+  if (await flushSaves()) showNotice("Your changes are saved.");
+});
+$("#btnReloadSaved").addEventListener("click", async () => {
+  if (!await askConfirm("Load saved data?", "This replaces the edits in this window with the last successful save. Export recovery first if you want to keep unsaved edits.")) return;
+  if (!STORE_READY) { await initializeApp(); return; }
+  await SAVE_QUEUE;
+  await refreshSavedData(true);
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") { saveDB(); saveDraft(); }
+  else { if (EXTERNAL_CHANGE) refreshSavedData(); updateOfflineStatus(); }
+});
+window.addEventListener("pagehide", () => { saveDB(); saveDraft(); });
+window.addEventListener("beforeunload", event => {
+  if (PENDING_SAVES || STORAGE_ERROR) { event.preventDefault(); event.returnValue = ""; }
+});
+window.addEventListener("online", updateOfflineStatus);
+window.addEventListener("offline", updateOfflineStatus);
+// Modal close and blur can make a pending update safe. Delay until current handlers finish.
+document.addEventListener("click", () => setTimeout(() => LiftLogUpdates.notifySafe(), 0));
+document.addEventListener("focusout", () => setTimeout(() => LiftLogUpdates.notifySafe(), 0));
+function updateRecapLinks() {
+  const months = LiftLogRecaps.availableMonths(DB);
+  $("#btnLatestRecap").disabled = !months.length;
+  $("#recapMonthLabel").textContent = months.length ? LiftLogRecaps.displayMonth(months[0])
+    : 'Your first review will appear after a month with completed workouts ends.';
+  $("#btnRecapArchive").hidden = !months.length;
+}
+
+async function editCompletedWorkout(id) {
+  if (!STORE_READY || STORAGE_ERROR || COMMITTING || UPDATE_LOCK) return;
+  const session = DB.sessions.find(item => item.id === id);
+  if (!session) return;
+  LiftLogHistoryEditor.open(session, {
+    getExercises: () => DB.exercises, unit: getWeightUnit(), confirm: askConfirm,
+    openExercisePicker, scrollLock: LOGGER_SCROLL_LOCK,
+    saveSession: async (next, baseline) => {
+      if (COMMITTING || UPDATE_LOCK || STORAGE_ERROR || !STORE_READY) return {ok: false, error: 'Your changes could not be saved. Try again.'};
+      COMMITTING = true; updateSaveStatus();
+      let committed = false;
+      try {
+        if (!await flushSaves()) return {ok: false, error: 'Your changes could not be saved. Try again.'};
+        const result = await STORE.editSession(next, baseline, {epoch: STORAGE_EPOCH});
+        committed = true;
+        applySnapshot(result);
+        renderHistory(); renderDashboard(); updateRecapLinks();
+        return {ok: true};
+      } catch (error) {
+        if (committed) {
+          showNotice('Your workout was saved. Reload LiftLog to refresh the screen.', 'error');
+          return {ok: true};
+        }
+        return {ok: false, error: error.message};
+      }
+      finally { COMMITTING = false; updateSaveStatus(); LiftLogUpdates.notifySafe(); }
+    },
+    onClose: () => LiftLogUpdates.notifySafe()
+  });
+}
+
+LiftLogRecaps.configure({
+  getDB: () => DB, getUnit: getWeightUnit, formatWeight: value => String(convertWeight(value)),
+  muscleColors: MUSCLE_COLORS, assetBase: './assets/recap/', scrollLock: LOGGER_SCROLL_LOCK,
+  onOpenChange: () => LiftLogUpdates.notifySafe()
+});
+$("#btnLatestRecap").addEventListener('click', () => LiftLogRecaps.open());
+$("#btnRecapArchive").addEventListener('click', () => LiftLogRecaps.openArchive());
+initializeApp();

@@ -1,0 +1,33 @@
+/* Decorative only: selected state, focus and native touch scrolling stay with buttons. */
+.sliding-control{position:relative;isolation:isolate}
+.sliding-control[data-slide-ready="true"]::before{content:"";position:absolute;z-index:0;left:0;top:0;width:var(--slide-width);height:var(--slide-height);box-sizing:border-box;border:0;border-radius:var(--slide-radius,999px);background:var(--slide-fill,var(--black));transform:translate(var(--slide-x),var(--slide-y));pointer-events:none}
+.sliding-control[data-slide-ready="true"][data-slide-animate="true"]::before{transition:transform 270ms cubic-bezier(.22,.8,.24,1),width 270ms cubic-bezier(.22,.8,.24,1),height 270ms cubic-bezier(.22,.8,.24,1),background-color 180ms ease}
+.sliding-control[data-slide-ready="true"]>button{position:relative;z-index:1;background:transparent!important;box-shadow:none!important;transform:none!important;transition:color 180ms ease}
+.sliding-control[data-slide-ready="true"]>button:is(.active,[aria-pressed="true"],[aria-current="page"]){color:var(--slide-ink,var(--white))!important}
+/* The fill moves inside one stationary outline, without crossing button borders. */
+.tabs.sliding-control{gap:4px;width:max-content;min-width:max-content;padding:4px;margin-inline:15px;border:2px solid var(--black);border-radius:999px;background:var(--gray);overflow:hidden}
+.tabs.sliding-control>button{border:0;min-height:40px}
+.tabs.sliding-control>button:focus-visible{outline:2px solid var(--red);outline-offset:-3px}
+.library-switch.sliding-control{overflow:hidden}
+/* Separate muscle pills keep their category edges; only their colour fades. */
+#pickerTabs>button,#libraryTabs>button{transition:background-color 180ms ease,color 180ms ease}
+/* The red accent is inset, so even the last nav choice stays inside its box. */
+.tabs.sliding-control[data-slide-ready="true"]::before,.library-switch.sliding-control[data-slide-ready="true"]::before{box-shadow:inset -3px -3px 0 var(--red)}
+/* Stats uses one full-width track, with equal choices and a red sliding fill. */
+#tab-stats :is(.bw-period-tabs,.progress-period-tabs,.chart-segments){display:flex;flex-wrap:nowrap;align-items:stretch;gap:4px;width:100%;min-width:0;padding:4px;border:2px solid var(--black);border-radius:999px;background:var(--gray);box-sizing:border-box}
+#tab-stats :is(.bw-period-tabs,.progress-period-tabs,.chart-segments)>button{flex:1 1 0;min-width:0;min-height:38px;margin:0;padding:6px 8px;border:0;border-radius:999px;background:transparent;color:var(--black);font:inherit;font-size:12px;font-weight:750;line-height:1.2;cursor:pointer}
+#tab-stats :is(.bw-period-tabs,.progress-period-tabs,.chart-segments)>button:is(.active,[aria-pressed="true"]){background:var(--red);color:#111}
+#tab-stats :is(.bw-period-tabs,.progress-period-tabs,.chart-segments).sliding-control[data-slide-ready="true"]::before{background:var(--red);border:0;box-shadow:none}
+#tab-stats :is(.bw-period-tabs,.progress-period-tabs,.chart-segments).sliding-control[data-slide-ready="true"]>button:is(.active,[aria-pressed="true"]){color:#111!important}
+#tab-stats :is(.bw-period-tabs,.progress-period-tabs,.chart-segments)>button:focus-visible{outline:2px solid var(--black);outline-offset:-3px}
+#tab-stats .bw-chart-toolbar{display:block}
+#tab-stats .bw-chart-controls{display:none}
+#tab-stats .breakdown-controls{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+.chart-segment-row{min-width:0;width:100%}
+#tab-stats .chart-segments{padding:3px}
+#tab-stats .chart-segments>button{min-height:34px;padding-block:5px}
+.chart-segments>button:disabled{cursor:default;opacity:.45}
+select.segmented-backing{display:none!important}
+@media(prefers-reduced-motion:reduce){.sliding-control[data-slide-ready="true"]::before,.sliding-control>button,#pickerTabs>button,#libraryTabs>button{transition:none!important}}
+@media(forced-colors:active){.sliding-control[data-slide-ready="true"]::before{background:Highlight;border-color:Highlight;box-shadow:none}.sliding-control[data-slide-ready="true"]>button:is(.active,[aria-pressed="true"],[aria-current="page"]){color:HighlightText!important}}
+@media(forced-colors:active){#tab-stats :is(.bw-period-tabs,.progress-period-tabs,.chart-segments).sliding-control[data-slide-ready="true"]::before{background:Highlight}#tab-stats :is(.bw-period-tabs,.progress-period-tabs,.chart-segments).sliding-control[data-slide-ready="true"]>button:is(.active,[aria-pressed="true"]){color:HighlightText!important}}

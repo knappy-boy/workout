@@ -1,0 +1,15 @@
+/* A stable grey track underneath the completed section. Only fresh saves animate. */
+.workout-step.rail-logged::before { background: #d6d6d6; }
+.workout-step::after { content: ''; position: absolute; left: -23px; top: 32px; height: calc(100% + 18px); width: 3px; background: var(--red); z-index: 0; transform: scaleY(0); transform-origin: top; pointer-events: none; }
+.workout-step.rail-logged::after { transform: scaleY(1); }
+.workout-step:last-child::after,.touch-drag-clone::after { display: none; }
+.workout-step.progress-rail-enter::after { animation: workout-rail-fill 420ms cubic-bezier(.2,.8,.2,1) var(--rail-delay,0ms) both; }
+.workout-step.progress-tick-enter .progress-tick { animation: workout-tick-in 260ms cubic-bezier(.2,.8,.2,1) both; }
+.workout-step.progress-next-enter .progress-node { animation: workout-next-pulse 540ms ease-out var(--node-delay,360ms) both; }
+.progress-tick { display: block; }
+@keyframes workout-rail-fill { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes workout-tick-in { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
+@keyframes workout-next-pulse { 0% { box-shadow: 0 0 0 0 rgb(255 51 51 / 0); } 30% { box-shadow: 0 0 0 6px rgb(255 51 51 / .24); } 100% { box-shadow: 0 0 0 10px rgb(255 51 51 / 0); } }
+@media (prefers-reduced-motion: reduce) {
+  .workout-step.progress-rail-enter::after,.workout-step.progress-tick-enter .progress-tick,.workout-step.progress-next-enter .progress-node { animation: none; }
+}

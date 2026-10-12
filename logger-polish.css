@@ -1,0 +1,61 @@
+/* Compact set cards share the picker’s rounded, muscle-coloured language. */
+#logModal .drawer{border-top:2px solid var(--black);border-radius:22px 22px 0 0;max-height:94dvh}
+#logModal .drawer-header{gap:12px;align-items:center;padding:16px;border-color:var(--black)}
+.logger-heading{min-width:0;flex:1}
+#logModalTitle{font-size:clamp(1.1rem,4.6vw,1.55rem);line-height:1.2;overflow-wrap:anywhere}
+.logger-header-actions{display:flex;align-items:center;gap:7px;flex:none}
+.logger-icon-button{display:grid;place-items:center;width:44px;height:44px;padding:8px;border:2px solid var(--black);border-radius:11px;background:var(--white);color:var(--black);box-shadow:2px 2px 0 var(--black);cursor:pointer;touch-action:manipulation}
+.logger-header-actions #logModalClose{font-size:1.25rem;line-height:1}
+.logger-copy-last{width:44px;height:44px;padding:4px;overflow:hidden}
+.logger-icon-button:focus-visible{outline:3px solid var(--red);outline-offset:3px}
+.logger-icon-button:active{transform:translateY(1px);box-shadow:1px 1px 0 var(--black)}
+.logger-icon-button:disabled{opacity:.5;cursor:default}
+.logger-symbol{display:block;flex:none;width:22px;height:22px;background:currentColor;-webkit-mask:var(--logger-icon) center/contain no-repeat;mask:var(--logger-icon) center/contain no-repeat}
+.logger-symbol-swap{--logger-icon:url('./assets/icons/shuffle-bold.svg')}
+.logger-symbol-close{--logger-icon:url('./assets/icons/x-bold.svg')}
+.logger-symbol-plus{--logger-icon:url('./assets/icons/plus-bold.svg');width:25px;height:25px}
+.logger-symbol-caret{--logger-icon:url('./assets/icons/caret-down-bold.svg');width:18px;height:18px}
+.logger-copy-artwork{position:relative;display:block;width:30px;height:27px;overflow:hidden}
+.logger-copy-artwork img{position:absolute;width:73.75px;height:auto;max-width:none;left:-20.416667px;top:-19.583333px;pointer-events:none}
+#logModal .drawer-body{padding:16px;min-width:0;padding-bottom:18px}
+.logger-previous{border:1px solid #b7b7b7;border-radius:13px;background:var(--gray);padding:12px;margin-bottom:16px;min-width:0}
+.logger-history-details summary{display:flex;align-items:center;justify-content:space-between;gap:10px;list-style:none;cursor:pointer;min-height:34px}
+.logger-history-details summary::-webkit-details-marker{display:none}
+.logger-history-details summary>span:first-child{display:flex;align-items:baseline;flex-wrap:wrap;gap:3px 8px;min-width:0}
+.logger-history-details summary strong{font-size:.87rem;line-height:1.35}
+.logger-history-details time{display:block;font-size:.78rem;color:#666;line-height:1.35}
+.logger-history-chevron{display:grid;place-items:center;flex:none;width:30px;height:30px;border:1.5px solid var(--black);border-radius:50%;background:var(--white)}
+.logger-history-chevron .logger-symbol{transition:transform 180ms ease}
+.logger-history-details[open] .logger-history-chevron .logger-symbol{transform:rotate(180deg)}
+.logger-previous-sets{display:grid;grid-template-columns:repeat(auto-fit,minmax(85px,1fr));gap:7px;margin-top:10px}
+.logger-previous-set{display:flex;align-items:center;justify-content:center;min-height:35px;border:1px solid #b7b7b7;border-radius:9px;background:var(--white);font-size:.82rem;font-weight:650;line-height:1.3;padding:6px;overflow-wrap:anywhere;text-align:center}
+#loggerCopySlot:empty{display:none}
+#logModal .log-rows{gap:12px}
+#logModal #logError:empty{margin:0;padding:0}
+#logModal .log-row{position:relative;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 12px;border:2px solid var(--black);border-radius:14px;padding:9px 12px 13px 18px;min-width:0;overflow:hidden;box-shadow:2px 3px 0 rgba(0,0,0,.12);background:var(--white)}
+#logModal .log-row::before{content:'';position:absolute;inset:0 auto 0 0;width:7px;background:var(--logger-muscle,#78909c)}
+#logModal .log-row[data-load-type="bodyweight"]{grid-template-columns:minmax(0,1fr)}
+.log-set-heading{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.log-set-heading strong{font-size:.87rem;font-weight:850;letter-spacing:.1px}
+#logModal .remove-row{display:grid;place-items:center;flex:none;width:40px;height:32px;min-height:32px;padding:4px;font-size:1.1rem;line-height:1;color:var(--red)}
+.log-field{display:grid;gap:6px;min-width:0;margin:0}
+.log-field-name{font-size:.66rem;font-weight:750;letter-spacing:.2px;line-height:1.25;color:#666}
+#logModal .log-row .neo-input{min-width:0;width:100%;max-width:100%;min-height:44px;height:44px;padding:9px 10px;border:2px solid var(--black);border-radius:10px;font-size:16px;font-weight:650;color:var(--black);background:var(--white)}
+#logModal .logger-bottom-row{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;gap:18px;margin-top:8px}
+#logModal .logger-add-set{width:100%;height:44px;min-height:44px;margin:0;padding:0;font-size:2rem;line-height:1;border-radius:12px;box-shadow:2px 3px 0 rgba(0,0,0,.2);display:grid;place-items:center}
+#logModal .log-notes{margin:0;gap:8px;min-width:0}
+#logModal .log-notes>label{font-size:.86rem;font-weight:750}
+#logNotes{width:100%;max-width:100%;min-height:74px;resize:vertical;padding:10px;font-size:16px;line-height:1.4;border:2px solid var(--black);border-radius:12px}
+.logger-footer{flex:none;padding:12px 16px max(14px,env(safe-area-inset-bottom));border-top:1px solid #d6d6d6;background:var(--white)}
+.logger-footer #btnSaveLog{min-height:48px;padding:11px 16px;border:2px solid var(--black);border-radius:12px;box-shadow:2px 3px 0 var(--black);font-size:1rem}
+.logger-sr-only,#logModal .log-row-mode{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+#logModal .log-bodyweight{grid-template-columns:minmax(0,1fr) 100px;margin-bottom:12px;padding:10px;border:1px solid #b7b7b7;background:var(--gray)}
+#logModal .log-bodyweight label{font-size:.78rem}
+#logBodyweightDate{display:block;margin-top:3px;font-size:.72rem;font-weight:500;color:#666}
+#logBodyweightDate[hidden]{display:none}
+.theme-dark .log-field-name,.theme-dark .logger-history-details time,.theme-dark #logBodyweightDate{color:#bbb}
+.theme-dark .logger-copy-artwork img{filter:invert(1);mix-blend-mode:screen}
+.theme-dark .logger-previous,.theme-dark .logger-previous-set,.theme-dark #logModal .log-bodyweight{border-color:#777}
+.theme-dark .logger-footer{border-color:#555}
+@media(max-width:350px){#logModal .drawer-header{padding:13px;gap:9px}#logModal .drawer-body{padding:13px}.logger-header-actions{gap:5px}.logger-icon-button{width:42px;height:44px}#logModalTitle{font-size:1.07rem}#logModal .log-row{column-gap:9px;padding-right:10px}.log-field-name{font-size:.63rem}.logger-footer{padding-left:13px;padding-right:13px}}
+@media(prefers-reduced-motion:reduce){.logger-history-chevron .logger-symbol{transition:none}}

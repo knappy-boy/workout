@@ -1,0 +1,108 @@
+/* Monthly recap: fixed spotlight layout; no global card press animation. */
+/* Recap colours follow the selected app theme; artwork keeps its original colours. */
+.recap-modal,.recap-stats-entry{
+  --recap-surface:#f6f4ee;
+  --recap-control:#fff;
+  --recap-ink:#111;
+  --recap-shadow:#111;
+  --recap-text:#171717;
+  --recap-detail:#333;
+  --recap-muted:#555;
+  --recap-divider:#bfbcb3;
+  --recap-workouts:#f8cf66;
+  --recap-time:#f7ece5;
+  --recap-weeks:#e8eee2;
+  --recap-highlight:#eee9fc;
+  --recap-accent:#ff4136;
+  --recap-focus:#225fbb;
+}
+.theme-dark .recap-modal,.theme-dark .recap-stats-entry{
+  --recap-surface:#181a1e;
+  --recap-control:#24262c;
+  --recap-ink:#f2f2f3;
+  --recap-shadow:#565963;
+  --recap-text:#f4f4f5;
+  --recap-detail:#dedde1;
+  --recap-muted:#c3c2c8;
+  --recap-divider:#565963;
+  --recap-workouts:#4a3b21;
+  --recap-time:#3b2d28;
+  --recap-weeks:#2b372b;
+  --recap-highlight:#312d42;
+  --recap-accent:#ff5555;
+  --recap-focus:#85b9ff;
+}
+dialog.neo-modal.recap-modal{width:min(94vw,570px);max-width:570px;max-height:min(90dvh,900px);border:3px solid var(--recap-ink);border-radius:24px;box-shadow:7px 7px 0 var(--recap-shadow);background:var(--recap-surface);color:var(--recap-text);overflow:hidden;padding:0}
+dialog.recap-modal[open]{display:flex;flex-direction:column}
+.recap-modal::backdrop{background:rgba(10,10,10,.65)}
+.recap-modal-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:17px 20px;border-bottom:2px solid var(--recap-ink);flex:none;background:var(--recap-control)}
+.recap-dialog-title{font-size:19px;line-height:1.2;font-weight:900;letter-spacing:-.025em;margin:0}
+.recap-close{width:42px;height:42px;min-height:42px;display:grid;place-items:center;padding:0;border:2px solid var(--recap-ink);border-radius:12px;background:var(--recap-control);color:var(--recap-text);box-shadow:2px 2px 0 var(--recap-shadow);font-size:26px;line-height:1;flex:none;cursor:pointer}
+.recap-modal-scroll{min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y;flex:1;padding:20px 18px max(24px,env(safe-area-inset-bottom));scrollbar-gutter:stable}
+.recap-panel{position:relative;isolation:isolate}
+.recap-cover{display:flex;align-items:center;flex-direction:column;text-align:center;gap:18px;padding:8px 0 16px;min-height:405px;overflow:hidden}
+.recap-cover-stage{position:relative;width:min(100%,320px);aspect-ratio:1;flex:none}
+.recap-cover-art{display:block;width:100%;height:100%;object-fit:contain;transform-origin:50% 55%;will-change:auto}
+.recap-reveal{background:var(--recap-accent);color:#111;border:3px solid var(--recap-ink);box-shadow:4px 4px 0 var(--recap-shadow);border-radius:14px;min-height:53px;font-size:18px;font-weight:900;line-height:1;padding:14px 32px;width:min(100%,310px);cursor:pointer}
+.recap-reveal:active{transform:translate(2px,2px);box-shadow:2px 2px 0 var(--recap-shadow)}
+.recap-reveal:disabled{cursor:default;opacity:1}
+.recap-panel[data-phase="opening"] .recap-cover-art{animation:recap-cover-open 900ms cubic-bezier(.22,.7,.2,1) both;will-change:transform,opacity}
+.recap-panel[data-phase="opening"] .recap-reveal{animation:recap-seal-press 900ms ease both}
+.recap-results-heading{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.recap-results-heading:focus{outline:none}
+.recap-spotlight{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"workouts time" "workouts weeks" "highlight highlight";gap:13px;padding:0 4px 4px 0;perspective:1000px}
+.recap-tile{position:relative;display:flex;flex-direction:column;justify-content:space-between;min-width:0;min-height:162px;background:var(--recap-control);border:3px solid var(--recap-ink);border-radius:19px;box-shadow:4px 4px 0 var(--recap-shadow);overflow:hidden;padding:16px;color:var(--recap-text);transform:none;transform-origin:50% 100%;backface-visibility:hidden;transition:none}
+.recap-modal .recap-tile:active{transform:none;box-shadow:4px 4px 0 var(--recap-shadow)}
+.recap-tile-wide{grid-column:1/-1;min-height:195px;display:grid;grid-template-columns:minmax(0,1fr) 43%;align-items:center;gap:8px}
+.recap-workouts{grid-area:workouts;background:var(--recap-workouts);min-height:337px}
+.recap-time{grid-area:time;background:var(--recap-time)}
+.recap-weeks{grid-area:weeks;background:var(--recap-weeks)}
+.recap-highlight{grid-area:highlight;background:var(--recap-highlight);border-top-color:var(--recap-ink);display:flex;flex-direction:column;padding:0;gap:0}
+.recap-highlight:before{content:"";position:absolute;top:0;left:0;right:0;height:6px;background:var(--recap-muscle-color,#ff4136)}
+.recap-highlight-stage{display:grid;grid-template-areas:"highlight";width:100%;padding:16px;flex:1}
+.recap-highlight-panel{grid-area:highlight;display:grid;grid-template-columns:minmax(0,1fr) 43%;align-items:center;gap:8px;min-width:0;min-height:162px;visibility:hidden;pointer-events:none}
+.recap-highlight-panel.is-current{visibility:visible;pointer-events:auto}
+.recap-highlight-panel.is-entering{animation:recap-highlight-enter 340ms cubic-bezier(.2,.75,.25,1) both}
+.recap-highlight-controls{display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:0 13px 12px;width:100%}
+.recap-highlight-nav{display:grid;place-items:center;min-height:44px;width:44px;padding:0;background:var(--recap-control);border:2px solid var(--recap-ink);border-radius:11px;box-shadow:2px 2px 0 var(--recap-shadow);font-size:25px;line-height:1;color:var(--recap-text);cursor:pointer}
+.recap-highlight-count{font-size:12px;font-weight:750;line-height:1;min-width:35px;text-align:center}
+.recap-highlight-panel.recap-art-unavailable{grid-template-columns:1fr}
+.recap-tile-copy{min-width:0;position:relative;z-index:1}
+.recap-tile-label{font-size:12px;font-weight:850;line-height:1.3;letter-spacing:.045em;text-transform:uppercase;margin:0 0 8px}
+.recap-tile-value{font-size:clamp(28px,7.5vw,44px);line-height:1.03;letter-spacing:-.045em;font-weight:950;margin:0 0 9px;overflow-wrap:anywhere}
+.recap-workouts .recap-tile-value{font-size:clamp(56px,15vw,76px)}
+.recap-highlight .recap-tile-value{font-size:clamp(23px,6.5vw,34px);line-height:1.1}
+.recap-tile-detail{font-size:12px;line-height:1.45;margin:0;font-weight:550;color:var(--recap-detail)}
+.recap-tile-art{display:block;width:100%;height:65px;object-fit:contain;align-self:flex-end;margin:6px 0 -3px;pointer-events:none}
+.recap-workouts .recap-tile-art{height:177px;align-self:center;margin:10px -4px -5px;width:calc(100% + 8px)}
+.recap-time .recap-tile-art,.recap-weeks .recap-tile-art{width:70px}
+.recap-tile-wide .recap-tile-art{height:162px;margin:0;max-width:100%}
+.theme-dark .recap-cover-art,.theme-dark .recap-tile-art{filter:drop-shadow(0 0 1px rgba(255,255,255,.72))}
+.recap-art-unavailable .recap-cover-art{display:none}
+.recap-tile-wide.recap-art-unavailable{grid-template-columns:1fr}
+.recap-archive-link{display:block;padding:10px 14px;min-height:44px;background:transparent;border:0;box-shadow:none;color:var(--recap-text);text-decoration:underline;text-underline-offset:4px;font-size:14px;font-weight:750;cursor:pointer}
+.recap-method{border-top:1px solid var(--recap-divider);border-bottom:1px solid var(--recap-divider);margin-top:24px;padding:14px 0;color:var(--recap-detail);font-size:12px;line-height:1.5}
+.recap-method summary{cursor:pointer;font-weight:750;min-height:30px;display:list-item}
+.recap-method p{margin:9px 0}
+.recap-archive{padding-top:25px}
+.recap-panel[data-phase="archive"] .recap-archive{padding-top:0}
+.recap-stats-entry #recapMonthLabel{font-size:14px;margin:8px 0 18px;color:var(--recap-muted)}
+.recap-entry-actions{display:flex;flex-wrap:wrap;gap:12px}
+.recap-entry-actions button{flex:1;min-width:140px;min-height:48px}
+.recap-entry-actions [hidden]{display:none!important}
+.recap-entry-actions button:disabled{cursor:default;opacity:.55}
+.recap-archive-title{font-size:16px;font-weight:850;margin:0 0 12px}
+.recap-archive-button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;text-align:left;padding:14px 13px;min-height:50px;margin:0 0 10px;border:2px solid var(--recap-ink);border-radius:12px;background:var(--recap-control);color:var(--recap-text);box-shadow:2px 2px 0 var(--recap-shadow);font-weight:750;font-size:14px;cursor:pointer}
+.recap-archive-button[aria-current="true"]{background:var(--recap-ink);color:var(--recap-control)}
+.recap-archive-current{font-size:11px;font-weight:600;flex:none}
+.recap-archive-arrow{font-size:19px}
+.recap-empty,.recap-explanation{font-size:14px;line-height:1.55;color:var(--recap-detail);margin:14px 0}
+.recap-modal [hidden]{display:none!important}
+.recap-modal button:focus-visible,.recap-modal summary:focus-visible{outline:3px solid var(--recap-focus);outline-offset:3px}
+.recap-animate-tiles .recap-tile{animation:recap-tile-unfurl 530ms cubic-bezier(.18,.75,.2,1) both;animation-delay:calc(var(--recap-tile-index)*105ms)}
+@keyframes recap-cover-open{0%{transform:translateX(0) rotate(0) scale(1);opacity:1}10%{transform:translateX(-5px) rotate(-4deg) scale(.98);opacity:1}20%{transform:translateX(5px) rotate(4deg) scale(.98);opacity:1}30%{transform:translateX(-3px) rotate(-2deg) scale(1);opacity:1}42%{transform:translateX(0) rotate(0) scale(.94);opacity:1}68%{transform:translateY(-6px) scale(1.18);opacity:1}100%{transform:translateY(-12px) scale(1.25);opacity:0}}
+@keyframes recap-seal-press{0%{transform:translate(0);opacity:1}20%{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--recap-shadow)}40%{transform:translate(0);opacity:1}100%{transform:translateY(10px);opacity:0}}
+@keyframes recap-tile-unfurl{from{opacity:0;transform:translate3d(0,22px,0) scale(.97)}to{opacity:1;transform:none}}
+@keyframes recap-highlight-enter{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+@media(max-width:370px){.recap-modal-scroll{padding:16px 12px 25px}.recap-spotlight{gap:10px}.recap-tile{padding:12px}.recap-tile-wide{grid-template-columns:minmax(0,1fr) 38%}.recap-highlight{padding:0}.recap-highlight-stage{padding:13px}.recap-highlight-panel{grid-template-columns:minmax(0,1fr) 38%}.recap-tile-label{font-size:11px}.recap-tile-detail{font-size:11px}.recap-tile-wide .recap-tile-art{height:140px}.recap-cover{min-height:360px}}
+@media(prefers-reduced-motion:reduce){.recap-modal *{animation:none!important;transition:none!important;scroll-behavior:auto!important}.recap-cover-art,.recap-reveal{transform:none!important;opacity:1!important}.recap-tile{transform:none!important;opacity:1!important}}

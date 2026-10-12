@@ -1,0 +1,12 @@
+{
+  "name": "liftlog",
+  "private": true,
+  "version": "2.0.0",
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "check": "node --check theme-runtime.js && node --check app.js && node --check storage.js && node --check dates.js && node --check logging.js && node --check updates.js && node --check sw.js && node --check chart-motion.js && node --check history-editor.js && node --check recaps.js && node --check workout-motion.js && node --check tap-feedback.js && node --check exercise-load.js && node --check sliding-controls.js"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.4"
+  }
+}

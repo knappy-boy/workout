@@ -6,7 +6,7 @@
   --gray: #f4f4f4;
   --border: 3px solid var(--black);
   --shadow: 5px 5px 0px 0px var(--black);
-  --font: 'Courier New', Courier, monospace; /* Brutalist vibe */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --radius: 0px; 
   --safe-area-bottom: env(safe-area-inset-bottom);
 }
@@ -23,12 +23,16 @@ body.theme-dark {
 
 /* BASE */
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html { background-color: var(--gray); }
+html { background-color: var(--gray); color-scheme: light; }
+/* The root paints Safari's overscroll area; body-scoped tokens do not reach it. */
+html:has(body.theme-dark) { background-color: #1e1e1e; color-scheme: dark; }
+body.theme-light { color-scheme: light; }
+body.theme-dark { color-scheme: dark; }
 body {
   margin: 0;
   background-color: var(--gray);
   color: var(--black);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font);
   padding-bottom: calc(20px + env(safe-area-inset-bottom));
   transition: background 0.3s;
   min-height: 100vh;
@@ -429,3 +433,39 @@ dialog.neo-modal::backdrop { background: rgba(0,0,0,0.8); }
 .draggable-exercise.drag-over { border-color: var(--red) !important; box-shadow: 0 0 0 3px var(--red); }
 .touch-drag-clone { box-shadow: 0 10px 30px rgba(0,0,0,0.3); transform: rotate(2deg); }
 .flex-1 { flex: 1; }
+
+/* Reliability feedback stays separate from the app's editable surface. */
+[hidden] { display: none !important; }
+.save-strip { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; padding: 7px 16px; font-size: .72rem; background: var(--white); color: var(--black); border-bottom: 1px solid #888; }
+#updateStatus { max-width: 34rem; }
+.app-notice, .storage-problem { padding: 12px 16px; background: #fff3ba; color: #111; border-bottom: 2px solid #111; font-size: .85rem; }
+.app-notice[data-kind="error"], .storage-problem { background: #ffe4df; }
+.theme-dark .app-notice { background: #342c17; color: #ffebb3; border-color: #a58a42; }
+.theme-dark .app-notice[data-kind="error"], .theme-dark .storage-problem { background: #3c211e; color: #ffc9c0; border-color: #be6255; }
+.storage-problem button, .storage-problem label { display: inline-block; margin: 4px 4px 4px 0; }
+#appDialog { width: min(92vw, 440px); max-height: 85dvh; overflow-y: auto; border: 3px solid var(--black); background: var(--white); color: var(--black); padding: 24px; box-shadow: 6px 6px 0 #000; }
+#appDialog::backdrop { background: rgba(0,0,0,.65); }
+#dialogMessage { white-space: pre-line; line-height: 1.5; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #2577e8; outline-offset: 3px; }
+.unit-toggle input { display: block; width: 1px; height: 1px; opacity: 0; }
+.drawer { max-height: 92dvh; }
+.drawer-body { min-height: 0; overscroll-behavior: contain; touch-action: pan-y; }
+#logNotes { min-height: 68px; }
+#logModal .drawer-body { overscroll-behavior-y: none; -webkit-overflow-scrolling: touch; }
+#logModal .log-actions { margin-top: 16px; }
+#logModal .log-notes { display: flex; flex-direction: column; gap: 12px; margin-top: 28px; }
+#logModal .log-notes > label { font-weight: 800; font-size: .95rem; }
+#logError { color: #c21e0c; font-weight: 700; padding-top: 8px; }
+.theme-dark #logError { color: #ffb2a6; }
+.prev-set-list { line-height: 1.6; }
+button:disabled { opacity: .55; cursor: wait; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+/* Keep successful saves quiet; make incomplete offline setup explicit. */
+.offline-setup p { line-height: 1.5; margin-top: 12px; }
+#offlineStatus { font-size: .9rem; font-weight: 700; }
+#offlineProgress { display: block; width: 100%; height: 12px; margin-top: 14px; accent-color: #2577e8; }
+#offlineProgressDetail { opacity: .8; }
+.log-save-status { flex: 0 0 auto; margin: 0; padding: 6px 15px; font-size: .72rem; line-height: 1.4; background: var(--white); color: var(--black); }
+.log-save-status[data-kind="error"] { background: #ffe4df; color: #9e1e14; font-weight: 700; }
+.theme-dark .log-save-status[data-kind="error"] { background: #3c211e; color: #ffc9c0; }

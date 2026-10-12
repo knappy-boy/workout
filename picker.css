@@ -1,0 +1,26 @@
+/* Exercise selection shares the editor's bounded, rounded sheet. */
+#pickerModal { padding: max(12px, env(safe-area-inset-top)) 14px max(12px, env(safe-area-inset-bottom)); }
+#pickerModal .picker-box { width: min(100%, 520px); height: min(710px, calc(100dvh - 32px)); max-height: calc(100dvh - 32px); border: 2px solid var(--black); border-radius: 24px; box-shadow: 5px 5px 0 var(--black); background: var(--white); padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.picker-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px 10px; }
+.picker-header h3 { margin: 0; font-size: 20px; }
+#pickerClose { flex: 0 0 44px; width: 44px; height: 44px; border: 2px solid var(--black); border-radius: 50%; background: var(--white); color: var(--black); font-size: 27px; line-height: 1; box-shadow: none; }
+.picker-filters { padding: 0 18px 12px; border-bottom: 2px solid var(--black); }
+#pickerSearch { min-height: 46px; font-size: 16px; margin: 0; }
+#pickerTabs { display: flex; flex-wrap: nowrap; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; padding: 10px 0 4px; margin: 0; scrollbar-width: none; }
+#pickerTabs .picker-tab { flex-shrink: 0; min-height: 40px; border: 2px solid var(--black); border-radius: 999px; padding: 7px 13px; background: var(--white); color: var(--black); box-shadow: none; }
+#pickerTabs .picker-tab.active { background: var(--filter-color, var(--black)); color: #111; }
+#pickerTabs .picker-tab:first-child.active { color: var(--white); }
+#pickerList { flex: 1 1 auto; min-height: 0; max-height: none; border: 0; margin: 0; padding: 14px 18px 18px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.picker-choice { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; width: 100%; min-height: 72px; text-align: left; padding: 13px 14px 13px 21px; margin: 0 0 10px; border: 2px solid var(--black); border-radius: 16px; box-shadow: 2px 3px 0 var(--black); background: var(--white); color: var(--black); overflow: hidden; }
+.picker-choice::before { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 7px; background: var(--muscle-color); }
+.picker-choice strong { font-size: 16px; line-height: 1.3; text-transform: none; overflow-wrap: anywhere; }
+.picker-choice-meta { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .035em; }
+.picker-footer { flex-shrink: 0; padding: 12px 18px 16px; border-top: 2px solid var(--black); background: var(--white); }
+.picker-footer button { min-height: 46px; }
+.picker-empty { margin: 32px 0 18px; text-align: center; }
+.picker-reset { display: block; margin: auto; }
+#pickerTitle:focus { outline: none; }
+#pickerModal button:focus-visible { outline: 3px solid var(--red); outline-offset: 2px; }
+@media(max-height:500px) { .picker-header { padding: 6px 16px; } .picker-filters { padding: 0 16px 6px; } #pickerTabs { padding-top: 5px; } .picker-footer { padding: 8px 16px; } }
+
+#pickerTabs::-webkit-scrollbar { display: none; }

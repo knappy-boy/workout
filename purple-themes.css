@@ -1,0 +1,148 @@
+/* Lilac Paper: colour tokens only; layout, data, muscle colours and gestures stay intact. */
+body.theme-purple {
+  --purple-page: #F1EAFB;
+  --purple-surface: #FFFBFF;
+  --purple-ink: #29153E;
+  --purple-muted: #695478;
+  --purple-accent: #7540C8;
+  --purple-on-accent: #FFFFFF;
+  --purple-line: #A18AAE;
+  --purple-soft: #E3D6F5;
+  --purple-shadow: #29153E;
+  --purple-grid: #D9CEE5;
+  --purple-danger: #982C63;
+  --purple-danger-surface: #FAE6F2;
+  --purple-recap-workouts: #E5D1FA;
+  --purple-recap-time: #F4E9FD;
+  --purple-recap-weeks: #EDE4FA;
+  --purple-recap-highlight: #DED1F3;
+  --purple-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%2329153E' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  color-scheme: light;
+}
+
+
+
+/* Existing app tokens provide the main surfaces, outlines and moving markers. */
+body.theme-purple {
+  --red: var(--purple-accent);
+  --black: var(--purple-ink);
+  --white: var(--purple-surface);
+  --gray: var(--purple-page);
+  --yellow: var(--purple-soft);
+  --muted: var(--purple-muted);
+  --border: 2px solid var(--purple-ink);
+  --shadow: 4px 4px 0 var(--purple-shadow);
+  --purple-chart-ink: var(--purple-ink);
+  --purple-chart-grid: var(--purple-grid);
+  --purple-chart-accent: var(--purple-accent);
+  --purple-chart-outline: var(--purple-ink);
+  background: var(--purple-page);
+  color: var(--purple-ink);
+}
+
+/* Safari overscroll is painted by html; body variables cannot inherit upwards. */
+html:has(body.theme-purple) { background: #F1EAFB; color-scheme: light; }
+
+body.theme-purple :is(.bg-red, .btn-red) { background: var(--purple-accent); color: var(--purple-on-accent); }
+body.theme-purple .bg-red :is(.timer-toggle, .muted-white, .btn-save-icon) { color: var(--purple-on-accent); }
+body.theme-purple .bg-black { background: var(--purple-ink); color: var(--purple-surface); }
+body.theme-purple .bg-yellow { background: var(--purple-soft); color: var(--purple-ink); border-color: var(--purple-ink); }
+body.theme-purple .btn-black { background: var(--purple-ink); color: var(--purple-surface); border-color: var(--purple-ink); }
+body.theme-purple .text-white { color: var(--purple-surface) !important; }
+body.theme-purple .bg-red.text-white { color: var(--purple-on-accent) !important; }
+body.theme-purple .text-red { color: var(--purple-accent) !important; }
+body.theme-purple .tabs-scroll { background: var(--purple-surface); border-color: var(--purple-ink); }
+body.theme-purple .tab { color: var(--purple-ink); border-color: var(--purple-ink); }
+body.theme-purple .tab.active { background: var(--purple-ink); color: var(--purple-surface); }
+
+body.theme-purple :is(.muted, .history-meta, .recent-log-muscles, .setting-hint, .breakdown-cardio, .template-builder-empty, .drag-handle, .ghost-val, .library-empty, .library-routine-meta, .library-routine-heading > span, .routine-exercises-heading span, .routine-builder-copy > span, .routine-exercise small, .exercise-field-help, #assistedExerciseHelp, .log-bodyweight p, .log-row-mode, .history-month-copy small, .history-summary-date, .history-summary-meta, .log-field-name, .logger-history-details time, #logBodyweightDate, .progress-range-status) { color: var(--purple-muted); }
+body.theme-purple input::placeholder,
+body.theme-purple textarea::placeholder { color: var(--purple-muted); opacity: 1; }
+
+body.theme-purple :is(.ex-history, .day-exercise, .ex-history-item, .bw-entry, .setting-row, .history-workout-body, .history-workout-actions, .simple-list li, .logger-footer, .he-set) { border-color: var(--purple-line); }
+body.theme-purple :is(.ex-item-card, .recent-log-item, .template-builder-item) { background: var(--purple-page); border-top-color: var(--purple-ink); border-right-color: var(--purple-ink); border-bottom-color: var(--purple-ink); }
+body.theme-purple .template-badge { background: var(--purple-surface); color: var(--purple-ink); border-color: var(--purple-ink); }
+body.theme-purple .set-tag { background: var(--purple-soft); color: var(--purple-ink); border-color: var(--purple-ink); }
+body.theme-purple .cal-day { background: var(--purple-surface); color: var(--purple-ink); border-color: var(--purple-line); }
+body.theme-purple .cal-day.empty { background: transparent; border: none; }
+body.theme-purple .cal-day.has-workout { background: var(--purple-ink) !important; color: var(--purple-surface) !important; border-color: var(--purple-ink); }
+body.theme-purple .cal-day.today { border-color: var(--purple-accent) !important; }
+
+/* Plain controls follow purple tokens; muscle-coloured controls retain their hue. */
+body.theme-purple :is(.unit-toggle-track, .toggle-slider) { background: var(--purple-soft); border-color: var(--purple-ink); }
+body.theme-purple :is(.unit-toggle-track, .toggle-slider)::before { background: var(--purple-ink); }
+body.theme-purple .toggle-switch input:checked + .toggle-slider { background: var(--purple-accent); }
+body.theme-purple .toggle-switch input:checked + .toggle-slider::before { background: var(--purple-on-accent); }
+body.theme-purple #newExAssisted:checked { background: var(--purple-accent); border-color: var(--purple-ink); }
+body.theme-purple #newExAssisted:checked::after { border-color: var(--purple-on-accent); }
+body.theme-purple #pickerTabs .picker-tab { border-color: var(--purple-ink); color: var(--purple-ink); }
+body.theme-purple #pickerTabs .picker-tab.active { color: #111; }
+body.theme-purple #pickerTabs .picker-tab:first-child.active { background: var(--purple-ink); color: var(--purple-surface); }
+body.theme-purple select.neo-select { background-image: var(--purple-chevron); }
+body.theme-purple :is(.routine-exercise i, .muscle-label i, .library-routine-exercise i, .routine-builder-copy i) { border-color: var(--purple-ink); }
+body.theme-purple #libraryRoutinesPanel .library-routine-actions { border-color: var(--purple-line); }
+
+body.theme-purple .history-shell { background: var(--purple-accent); border-color: var(--purple-ink); box-shadow: 5px 5px 0 var(--purple-shadow); color: var(--purple-on-accent); }
+body.theme-purple .history-shell > h2,
+body.theme-purple .history-shell #historyLog > .muted { color: var(--purple-on-accent); }
+body.theme-purple #historyLog .history-month-header { background: var(--purple-surface); color: var(--purple-ink); }
+body.theme-purple #historyLog .history-month[open] > .history-month-header { background: var(--purple-page); }
+body.theme-purple #tab-settings .neo-card.bg-black.text-white { background: var(--purple-soft); color: var(--purple-ink) !important; box-shadow: var(--shadow); }
+
+/* Logger copy art keeps its exact glyph; blending removes its white crop edges. */
+body.theme-purple .logger-copy-artwork img { mix-blend-mode: multiply; filter: none; }
+body.theme-purple :is(.logger-previous, .logger-previous-set) { border-color: var(--purple-line); }
+body.theme-purple #logModal .log-bodyweight { border-color: var(--purple-line); }
+body.theme-purple #logModal .log-row { box-shadow: 2px 3px 0 var(--purple-soft); }
+body.theme-purple #logModal .logger-add-set { box-shadow: 2px 3px 0 var(--purple-shadow); }
+body.theme-purple .progress-node { color: var(--purple-on-accent); }
+body.theme-purple .workout-step::before { background: var(--purple-line); }
+body.theme-purple .workout-step.rail-logged::before { background: var(--purple-line); }
+body.theme-purple .workout-step.progress-next-enter .progress-node { animation-name: purple-workout-next-pulse; }
+@keyframes purple-workout-next-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--purple-accent) 0%, transparent); }
+  30% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--purple-accent) 24%, transparent); }
+  100% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--purple-accent) 0%, transparent); }
+}
+
+body.theme-purple #tab-stats :is(.bw-period-tabs, .progress-period-tabs, .chart-segments) > button:is(.active, [aria-pressed="true"]),
+body.theme-purple #tab-stats :is(.bw-period-tabs, .progress-period-tabs, .chart-segments).sliding-control[data-slide-ready="true"] > button:is(.active, [aria-pressed="true"]) { color: var(--purple-on-accent) !important; }
+body.theme-purple .chart-readout { background: var(--purple-surface); color: var(--purple-ink); border-color: var(--purple-ink); box-shadow: 2px 2px 0 var(--purple-shadow); }
+body.theme-purple #breakdownLegend .legend-tab { border-color: var(--purple-ink) !important; }
+body.theme-purple #breakdownLegend .legend-tab.inactive { color: var(--purple-ink) !important; }
+body.theme-purple #breakdownLegend .legend-tab:first-child.active { background: var(--purple-ink) !important; color: var(--purple-surface) !important; }
+
+/* Editing actions and error states remain recognisable without a red brand tint. */
+body.theme-purple .he-primary { background: var(--purple-accent); color: var(--purple-on-accent) !important; }
+body.theme-purple .he-drop-before::before,
+body.theme-purple .he-drop-after::after { background: var(--purple-accent); }
+body.theme-purple :is(.he-text-danger, .he-remove-exercise, .he-error, .exercise-archive, .routine-remove, #templateBuilderError, #logError, .progress-range-status.is-error, #btnFactoryReset) { color: var(--purple-danger) !important; }
+body.theme-purple :is(.app-notice, .storage-problem, .log-save-status[data-kind="error"]) { background: var(--purple-danger-surface); color: var(--purple-danger); border-color: var(--purple-danger); }
+body.theme-purple :is(button, input, select, textarea, summary, [tabindex]):focus-visible { outline-color: var(--purple-accent); }
+body.theme-purple .overlay,
+body.theme-purple dialog::backdrop { background: rgb(22 13 35 / .76); }
+
+/* Recap has its own scoped tokens; map every tile and control into the palette. */
+body.theme-purple :is(.recap-modal, .recap-stats-entry) {
+  --recap-surface: var(--purple-page);
+  --recap-control: var(--purple-surface);
+  --recap-ink: var(--purple-ink);
+  --recap-shadow: var(--purple-shadow);
+  --recap-text: var(--purple-ink);
+  --recap-detail: var(--purple-ink);
+  --recap-muted: var(--purple-muted);
+  --recap-divider: var(--purple-line);
+  --recap-workouts: var(--purple-recap-workouts);
+  --recap-time: var(--purple-recap-time);
+  --recap-weeks: var(--purple-recap-weeks);
+  --recap-highlight: var(--purple-recap-highlight);
+  --recap-accent: var(--purple-accent);
+  --recap-focus: var(--purple-accent);
+}
+body.theme-purple .recap-reveal { color: var(--purple-on-accent); }
+body.theme-purple :is(.recap-cover-art, .recap-tile-art) { filter: none; }
+
+@media (forced-colors: active) {
+  body.theme-purple select.neo-select { background-image: none; }
+  body.theme-purple #tab-stats :is(.bw-period-tabs, .progress-period-tabs, .chart-segments).sliding-control[data-slide-ready="true"] > button:is(.active, [aria-pressed="true"]) { color: HighlightText !important; }
+}

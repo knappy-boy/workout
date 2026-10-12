@@ -2,16 +2,39 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#FF3333" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <title>LIFTLOG ULTRA</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <script src="theme-runtime.js"></script>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="interface.css">
+  <link rel="stylesheet" href="workout-motion.css">
+  <link rel="stylesheet" href="library-history.css">
+  <link rel="stylesheet" href="routine-editor.css">
+  <link rel="stylesheet" href="picker.css">
+  <link rel="stylesheet" href="stats-polish.css">
+  <link rel="stylesheet" href="history-editor.css">
+  <link rel="stylesheet" href="recaps.css">
+  <link rel="stylesheet" href="logger-polish.css">
+  <link rel="stylesheet" href="sliding-controls.css">
+  <link rel="stylesheet" href="purple-themes.css">
 </head>
 <body class="theme-light">
+  <div class="save-strip"><span id="saveStatus" role="status" aria-live="polite">Opening your saved data…</span><span id="updateStatus" role="status" hidden></span></div>
+  <div id="appNotice" role="status" class="app-notice" hidden></div>
+  <section id="storageProblem" class="storage-problem" role="alert" hidden>
+    <strong>Your changes need attention</strong><p id="storageProblemText"></p>
+    <p>Your last saved data has been kept. Export recovery before reloading if you have unsaved edits.</p>
+    <button id="btnExportRecovery" class="btn-small">EXPORT RECOVERY</button>
+    <button id="btnRetrySave" class="btn-small">RETRY SAVE</button>
+    <button id="btnReloadSaved" class="btn-small">LOAD SAVED DATA</button>
+    <label class="btn-small">RESTORE BACKUP <input id="recoveryRestore" type="file" accept="application/json,.json" hidden></label>
+  </section>
+  <div id="appShell" inert>
   <header>
     <div class="brand">
       <h1>LIFT<span class="outline">LOG</span></h1>
@@ -23,9 +46,9 @@
 
   <nav class="tabs-scroll">
     <div class="tabs">
-      <button class="tab active" data-tab="dashboard">DASHBOARD</button>
+      <button class="tab active" data-tab="dashboard">HOME</button>
       <button class="tab" data-tab="workout">WORKOUT</button>
-      <button class="tab" data-tab="exercises">EXERCISES</button>
+      <button class="tab" data-tab="exercises">LIBRARY</button>
       <button class="tab" data-tab="history">HISTORY</button>
       <button class="tab" data-tab="stats">STATS</button>
       <button class="tab" data-tab="settings">SETTINGS</button>
@@ -34,13 +57,7 @@
 
   <main>
     <section id="tab-dashboard" class="panel active">
-      <div class="neo-card bg-white">
-        <h2>START WORKOUT</h2>
-        <select id="dashboardTemplateSelect" class="neo-select full mt-2">
-          <option value="">Freestyle (no template)</option>
-        </select>
-        <button id="btnQuickStart" class="btn-red full mt-2 quick-start-btn">START</button>
-      </div>
+      <button id="btnQuickStart" class="btn-red full quick-start-btn">START WORKOUT</button>
 
       <div class="neo-card bg-white mt-4">
         <h2>RECENT WORKOUTS</h2>
@@ -63,6 +80,7 @@
 
     <section id="tab-workout" class="panel">
       <div id="activeWorkoutPanel" class="hidden">
+        <div class="workout-heading"><h2 id="activeRoutineName">FREESTYLE</h2><span id="workoutProgress" class="muted small"></span></div>
         <!-- Timer card - click anywhere to toggle timer display -->
         <div id="timerCard" class="neo-card bg-red text-white mb-4 timer-card">
           <div class="row">
@@ -72,7 +90,7 @@
                 <polyline points="12 6 12 12 16 14"/>
               </svg>
             </div>
-            <div id="timerDisplay" class="timer-display hidden">
+            <div id="timerDisplay" class="timer-display">
               <h2 id="workoutTimer">00:00</h2>
             </div>
             <button id="btnFinishWorkout" class="btn-white">FINISH</button>
@@ -99,48 +117,42 @@
       </div>
 
       <div id="startWorkoutPanel">
-        <div class="neo-card bg-white">
-          <h2>START WORKOUT</h2>
-          <div class="row gap-2 mt-2">
-            <select id="templateSelect" class="neo-select full">
-              <option value="">(Select Routine)</option>
-            </select>
-          </div>
-          <div class="row gap-2 mt-2">
-            <button id="btnStartEmpty" class="btn-black full">FREESTYLE</button>
-            <button id="btnStartTemplate" class="btn-red full">START</button>
-          </div>
-        </div>
+        <h2 class="start-heading">START WORKOUT</h2>
+        <button id="btnStartEmpty" class="routine-start-card freestyle-card"><strong>FREESTYLE</strong><span class="muted small">Add exercises as you go</span></button>
+        <div id="routineStartCards"></div>
 
-        <div class="neo-card bg-white mt-4">
-          <div class="row collapsible-header" id="templatesHeader">
-             <h3>MY ROUTINES <span id="templatesToggle" class="toggle-icon">▼</span></h3>
-             <button id="btnNewTemplate" class="btn-small">+ NEW</button>
-          </div>
-          <div id="templatesContent" class="collapsible-content">
-            <ul id="templateList" class="simple-list mt-2"></ul>
-          </div>
-        </div>
       </div>
     </section>
 
     <section id="tab-exercises" class="panel">
-      <div class="neo-card bg-white">
-        <div class="row">
-            <h2>LIBRARY</h2>
+      <div id="librarySwitch" class="library-switch" data-view="exercises" role="group" aria-label="Library view">
+        <button id="btnLibraryExercises" type="button" aria-pressed="true" aria-controls="libraryExercisesPanel">EXERCISES</button>
+        <button id="btnLibraryRoutines" type="button" aria-pressed="false" aria-controls="libraryRoutinesPanel">ROUTINES</button>
+      </div>
+      <div id="libraryExercisesPanel" class="neo-card bg-white">
+        <div class="library-section-heading">
+            <h2>EXERCISES</h2>
             <button id="btnShowAddEx" class="btn-black small">+ NEW</button>
         </div>
         
         <div id="libraryTabs" class="picker-tabs mt-2"></div>
-        <input id="searchEx" class="neo-input full mt-2" placeholder="Search...">
+        <input id="searchEx" class="neo-input full mt-2" placeholder="Search exercises" aria-label="Search exercises">
 
         <div id="exerciseList" class="exercise-grid mt-2"></div>
       </div>
-
+      <div id="libraryRoutinesPanel" class="neo-card bg-white" hidden>
+        <div class="library-section-heading" id="templatesHeader">
+          <h2>MY ROUTINES</h2>
+          <button id="btnNewTemplate" class="btn-black small">+ NEW</button>
+        </div>
+        <div id="templatesContent">
+          <ul id="templateList" class="simple-list mt-2"></ul>
+        </div>
+      </div>
     </section>
 
     <section id="tab-history" class="panel">
-      <div class="neo-card bg-white">
+      <div class="neo-card history-shell">
         <h2>LOGS</h2>
         <div id="historyLog" class="history-stream"></div>
       </div>
@@ -149,15 +161,17 @@
     <section id="tab-stats" class="panel">
       <div class="neo-card bg-white">
         <h2>BODYWEIGHT</h2>
-        <div class="bw-period-tabs mb-2">
-          <button class="bw-period-tab active" data-period="month">Month</button>
-          <button class="bw-period-tab" data-period="year">Year</button>
-          <button class="bw-period-tab" data-period="all">All</button>
+        <div class="bw-chart-toolbar">
+          <div class="bw-period-tabs" role="group" aria-label="Bodyweight period">
+            <button class="bw-period-tab active" data-period="month">Month</button>
+            <button class="bw-period-tab" data-period="year">Year</button>
+            <button class="bw-period-tab" data-period="all">All</button>
+          </div>
         </div>
         <div class="chart-container bw-chart-container">
-          <canvas id="bwChart"></canvas>
+          <canvas id="bwChart" aria-describedby="bwChartHelp"></canvas>
         </div>
-        <div class="bw-zoom-hint muted small mt-1">Pinch or scroll to zoom • Drag to pan</div>
+        <div id="bwChartHelp" class="bw-zoom-hint chart-sr-only">Pinch or scroll to zoom • Drag to pan</div>
         <div class="row mt-2">
           <input id="bwInput" type="number" step="0.1" inputmode="decimal" placeholder="Weight" autocomplete="off">
           <span id="bwUnitLabel" class="unit-label">kg</span>
@@ -168,40 +182,75 @@
 
       <div class="neo-card bg-white mt-4 no-nudge">
         <h2>EXERCISE PROGRESS</h2>
-        <div class="row gap-2 mb-2">
-          <select id="statExSelect" class="neo-select full"></select>
-          <select id="statChartType" class="neo-select" style="width: auto;">
-            <option value="volume">Volume</option>
-            <option value="maxWeight">Max Weight</option>
-          </select>
+        <div class="mb-2 progress-controls">
+          <div id="statExercisePill" class="progress-exercise-pill">
+            <select id="statExSelect" class="neo-select full" aria-label="Exercise"></select>
+          </div>
+          <select id="statLoadMode" class="neo-select progress-load-mode" aria-label="Recorded load type" hidden></select>
+          <div class="chart-segment-row">
+            <select id="statChartType" class="neo-select" aria-label="Progress measure">
+              <option value="volume">Volume</option>
+              <option value="maxWeight">Max weight</option>
+            </select>
+            <div id="progressMetricSegments" class="chart-segments" data-segment-for="statChartType" role="group" aria-label="Progress measure"></div>
+          </div>
+        </div>
+        <div id="progressRange" class="progress-range" data-period="all">
+          <div class="progress-period-tabs" role="group" aria-label="Exercise progress date range">
+            <button class="progress-period-tab" data-period="month" aria-pressed="false">Month</button>
+            <button class="progress-period-tab" data-period="year" aria-pressed="false">Year</button>
+            <button class="progress-period-tab active" data-period="all" aria-pressed="true">All</button>
+            <button class="progress-period-tab" data-period="custom" aria-pressed="false">Custom</button>
+          </div>
+          <div id="progressCustomDates" class="progress-custom-dates" hidden>
+            <label>From<span class="progress-date-field"><input id="progressFrom" type="date" aria-describedby="progressRangeStatus"></span></label>
+            <label>To<span class="progress-date-field"><input id="progressTo" type="date" aria-describedby="progressRangeStatus"></span></label>
+          </div>
+          <p id="progressRangeStatus" class="progress-range-status" aria-live="polite">All time</p>
         </div>
         <div class="chart-container large">
           <canvas id="progChart"></canvas>
         </div>
+        <p id="statMetricNote" class="muted small stat-metric-note" hidden></p>
         <div class="exercise-history-wrapper mt-4">
-          <h3 class="exercise-history-header">LIFT HISTORY</h3>
-          <div id="exerciseHistory" class="exercise-history"></div>
-          <div id="exerciseHistoryToggle"></div>
+          <div class="exercise-history-heading-row">
+            <h3 class="exercise-history-header">LIFT HISTORY</h3>
+            <button id="btnToggleLiftHistory" class="lift-history-toggle" aria-label="Expand lift history" aria-expanded="false" aria-controls="exerciseHistoryRegion">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+          </div>
+          <div id="exerciseHistoryRegion" class="exercise-history-region" hidden>
+            <div id="exerciseHistory" class="exercise-history" role="region" aria-label="Lift history for the selected date range" tabindex="0"></div>
+          </div>
         </div>
       </div>
 
       <div class="neo-card bg-white mt-4">
         <h2>WORKOUT BREAKDOWN</h2>
-        <div class="row gap-2 mb-2 mt-2">
-          <select id="breakdownPeriod" class="neo-select">
-            <option value="week">Week</option>
-            <option value="month">Month</option>
-            <option value="year">Year</option>
-          </select>
-          <select id="breakdownGranularity" class="neo-select hidden">
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-          </select>
-          <select id="breakdownMode" class="neo-select">
-            <option value="volume">Volume</option>
-            <option value="sets">Sets</option>
-          </select>
+        <div class="row gap-2 mb-2 mt-2 breakdown-controls">
+          <div class="chart-segment-row">
+            <select id="breakdownPeriod" class="neo-select" aria-label="Breakdown period">
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+              <option value="year">Year</option>
+            </select>
+            <div class="chart-segments" data-segment-for="breakdownPeriod" role="group" aria-label="Breakdown period" hidden></div>
+          </div>
+          <div class="chart-segment-row">
+            <select id="breakdownGranularity" class="neo-select hidden" aria-label="Breakdown grouping">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+            <div class="chart-segments" data-segment-for="breakdownGranularity" role="group" aria-label="Breakdown grouping" hidden></div>
+          </div>
+          <div class="chart-segment-row">
+            <select id="breakdownMode" class="neo-select" aria-label="Breakdown measure">
+              <option value="volume">Volume</option>
+              <option value="sets">Sets</option>
+            </select>
+            <div class="chart-segments" data-segment-for="breakdownMode" role="group" aria-label="Breakdown measure" hidden></div>
+          </div>
         </div>
         <div class="row mb-2">
           <button id="btnPrevBreakdown" class="btn-ghost">◀</button>
@@ -209,11 +258,20 @@
           <button id="btnNextBreakdown" class="btn-ghost">▶</button>
         </div>
         <div class="chart-container large">
-          <canvas id="breakdownChart"></canvas>
+          <canvas id="breakdownChart" aria-describedby="breakdownCardio"></canvas>
         </div>
         <div id="breakdownLegend" class="breakdown-legend mt-2"></div>
-        <div id="breakdownCardio" class="breakdown-cardio mt-2"></div>
+        <div id="breakdownCardio" class="chart-sr-only"></div>
       </div>
+
+      <section class="neo-card bg-white mt-4 recap-stats-entry" aria-labelledby="recapStatsTitle">
+        <h2 id="recapStatsTitle">MONTH IN REVIEW</h2>
+        <p id="recapMonthLabel">Your completed months, all in one place.</p>
+        <div class="recap-entry-actions">
+          <button id="btnLatestRecap" class="btn-red" disabled>OPEN REVIEW</button>
+          <button id="btnRecapArchive" class="btn-white" hidden>PREVIOUS MONTHS</button>
+        </div>
+      </section>
 
     </section>
 
@@ -223,47 +281,32 @@
         <div class="setting-row">
           <span>Weight Unit</span>
           <label class="unit-toggle">
-            <input type="checkbox" id="settingUnit">
+            <input type="checkbox" id="settingUnit" aria-label="Use pounds">
             <span class="unit-label-kg">KG</span>
             <span class="unit-toggle-track"></span>
             <span class="unit-label-lbs">LBS</span>
           </label>
         </div>
-        <div class="setting-row">
-          <span>Show Suggestions</span>
-          <label class="toggle-switch">
-            <input type="checkbox" id="settingSuggestions" checked>
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="setting-row">
-          <div>
-            <span>Include Compound Muscles</span>
-            <div class="setting-hint">Secondary muscles get 50% credit in charts</div>
-          </div>
-          <label class="toggle-switch">
-            <input type="checkbox" id="settingCompound" checked>
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="setting-row">
-          <span>Training Goal</span>
-          <select id="settingGoal" class="neo-select" style="width: auto;">
-            <option value="hypertrophy">Hypertrophy (8-20 reps)</option>
-            <option value="strength">Strength (1-5 reps)</option>
-          </select>
-        </div>
       </div>
 
+      <section class="neo-card bg-white mt-4 offline-setup" aria-labelledby="offlineTitle">
+        <h2 id="offlineTitle">OFFLINE ACCESS</h2>
+        <p id="offlineHelp" class="small">Download the app once to open it without internet. Your workout entries are saved separately.</p>
+        <p id="offlineStatus" role="status">Checking offline access…</p>
+        <progress id="offlineProgress" aria-label="Progress in the current offline setup step" max="1" hidden></progress>
+        <p id="offlineProgressDetail" class="small" hidden></p>
+        <button id="btnRetryOffline" class="btn-black full mt-2" hidden>RETRY DOWNLOAD</button>
+      </section>
       <div class="neo-card bg-black text-white mt-4">
         <div class="row collapsible-header" id="dataHeader">
           <h2>DATA <span id="dataToggle" class="toggle-icon collapsed">▼</span></h2>
         </div>
+        <p class="small">Workouts save automatically on this device, including unfinished workouts. App updates keep them. Keep an occasional backup for a lost phone or cleared website data.</p>
         <div id="dataContent" class="collapsible-content collapsed">
           <button id="btnExportCSV" class="btn-white full mt-2">EXPORT CSV</button>
           <button id="btnExportJSON" class="btn-white full mt-2">BACKUP (JSON)</button>
           <label class="btn-white full mt-2 text-center block">
-             RESTORE (JSON) <input type="file" id="fileRestore" hidden>
+             RESTORE (JSON) <input type="file" id="fileRestore" accept="application/json,.json" hidden>
           </label>
           <button id="btnFactoryReset" class="btn-white full mt-4" style="color: #ff3333;">FACTORY RESET</button>
         </div>
@@ -273,115 +316,135 @@
   </main>
 
   <div id="logModal" class="overlay hidden">
-    <div class="drawer">
+    <div class="drawer" role="dialog" aria-modal="true" aria-labelledby="logModalTitle">
       <div class="drawer-handle"></div>
       <div class="drawer-header">
-        <h2 id="logModalTitle">Bench Press</h2>
-        <button id="logModalClose" class="btn-ghost">✕</button>
+        <div class="logger-heading">
+          <h2 id="logModalTitle">Bench Press</h2>
+        </div>
+        <div class="logger-header-actions">
+          <div id="loggerCopySlot"></div>
+          <button id="btnSwapLogExercise" class="logger-icon-button" type="button" aria-label="Swap exercise" title="Swap exercise">
+            <span class="logger-symbol logger-symbol-swap" aria-hidden="true"></span>
+          </button>
+          <button id="logModalClose" class="logger-icon-button" type="button" aria-label="Close exercise log"><span class="logger-symbol logger-symbol-close" aria-hidden="true"></span></button>
+        </div>
       </div>
-      
+      <p id="logSaveStatus" role="status" aria-live="polite" class="log-save-status" hidden></p>
       <div class="drawer-body">
-        <div id="prevSessionInfo" class="info-box mb-2"></div>
-        
-        <div class="log-headers" id="logHeaders">
-            <span>SET</span>
-            <span class="h-val-1">KG</span>
-            <span class="h-val-2">REPS</span>
-            <span></span>
+        <div id="prevSessionInfo" class="logger-previous" hidden></div>
+        <div id="logBodyweight" class="log-bodyweight" hidden>
+          <label for="logBodyweightInput">Workout bodyweight <span id="logBodyweightUnit"></span><time id="logBodyweightDate" hidden></time></label>
+          <input id="logBodyweightInput" class="neo-input" type="text" inputmode="decimal" autocomplete="off" placeholder="Optional" aria-describedby="logBodyweightHelp">
+          <p id="logBodyweightHelp" class="logger-sr-only">Used for estimates on new sets. Saved sets keep their recorded value.</p>
+        </div>
+        <div class="log-headers logger-sr-only" id="logHeaders">
+          <span>SET</span><span class="h-val-1">KG</span><span class="h-val-2">REPS</span><span></span>
         </div>
         <div id="logRows" class="log-rows"></div>
-        
-        <div class="row mt-2 gap-2">
-             <button id="btnAddRow" class="btn-black full">+ SET</button>
-             <button id="btnSaveLog" class="btn-red full">SAVE</button>
+        <div class="logger-bottom-row">
+          <button id="btnAddRow" class="btn-black logger-add-set" type="button" aria-label="Add set" title="Add set"><span class="logger-symbol logger-symbol-plus" aria-hidden="true"></span></button>
+          <section class="log-notes">
+            <label for="logNotes">Notes</label>
+            <textarea id="logNotes" class="neo-input full" placeholder="Notes…"></textarea>
+          </section>
         </div>
-        <div class="row mt-2">
-             <textarea id="logNotes" class="neo-input full" placeholder="Notes..."></textarea>
-        </div>
+      </div>
+      <div class="logger-footer">
+        <button id="btnSaveLog" class="btn-red full" type="button">SAVE</button>
       </div>
     </div>
   </div>
 
   <div id="pickerModal" class="overlay hidden">
-     <div class="picker-box">
-         <h3>SELECT EXERCISE</h3>
-         <div id="pickerTabs" class="picker-tabs"></div>
-         <input id="pickerSearch" class="neo-input full mb-2" placeholder="Search...">
-         <div id="pickerList" class="picker-list"></div>
-         <button id="pickerClose" class="btn-black full mt-2">CANCEL</button>
-     </div>
-  </div>
-
-  <div id="addExModal" class="overlay hidden">
-    <div class="modal-box">
-      <h3 id="exModalTitle">NEW EXERCISE</h3>
-      <label>Name <input id="newExName" class="neo-input"></label>
-      <div class="row gap-2">
-        <label>Type
-            <select id="newExType" class="neo-select">
-                <option value="strength">Strength</option>
-                <option value="cardio">Cardio</option>
-            </select>
-        </label>
-        <label id="muscleSelectWrapper">Muscle
-            <select id="newExMuscle" class="neo-select"></select>
-        </label>
+    <div class="picker-box" role="dialog" aria-modal="true" aria-labelledby="pickerTitle">
+      <div class="picker-header">
+        <h3 id="pickerTitle" tabindex="-1">SELECT EXERCISE</h3>
+        <button id="pickerClose" type="button" aria-label="Close exercise picker">×</button>
       </div>
-      <div id="strengthOptions">
-        <div class="grid-2">
-          <label>Equip <select id="newExEquip" class="neo-select"></select></label>
-          <label>Increment <input id="newExInc" type="number" value="2.5" class="neo-input"></label>
-        </div>
-        <label class="checkbox-label mt-2">
-          <input type="checkbox" id="newExAssisted">
-          Assisted exercise
-        </label>
-        <label class="checkbox-label mt-2">
-          <input type="checkbox" id="newExCompound">
-          Compound exercise (multiple muscles)
-        </label>
-        <div id="secondaryMusclesWrapper" class="hidden mt-2">
-          <label>Secondary Muscles</label>
-          <div id="secondaryMusclesList" class="secondary-muscles-list"></div>
-        </div>
+      <div class="picker-filters">
+        <input id="pickerSearch" class="neo-input full" type="search" autocomplete="off" placeholder="Search exercises" aria-label="Search exercises">
+        <div id="pickerTabs" class="picker-tabs" role="group" aria-label="Muscle filter"></div>
       </div>
-      <div id="cardioOptions" class="hidden mt-2">
-         <label>Secondary metric name
-           <input id="newExCardioMetric" class="neo-input" placeholder="e.g. floors, km, laps">
-         </label>
-         <p class="muted small">Leave blank for default. Primary metric is always time (minutes).</p>
-         <label class="mt-2">Goal Type
-           <select id="newExCardioGoal" class="neo-select">
-             <option value="endurance">Endurance (distance/time)</option>
-             <option value="speed">Speed/Sprints (pace)</option>
-           </select>
-         </label>
-      </div>
-      <div class="row mt-4">
-        <button id="btnCloseExModal" class="btn-ghost">CANCEL</button>
-        <button id="btnDeleteEx" class="btn-ghost text-red hidden">DELETE</button>
-        <button id="btnSaveEx" class="btn-red">SAVE</button>
-      </div>
+      <span id="pickerStatus" class="chart-sr-only" role="status"></span>
+      <div id="pickerList" class="picker-list" aria-label="Exercises"></div>
+      <div id="pickerFooter" class="picker-footer"><button id="pickerCreate" type="button" class="btn-black full">+ NEW EXERCISE</button></div>
     </div>
   </div>
 
-  <div id="templateBuilderModal" class="overlay hidden">
-    <div class="modal-box">
-      <h3 id="templateBuilderTitle">CREATE ROUTINE</h3>
-      <label class="mt-2">Routine Name
-        <input id="templateBuilderName" class="neo-input" placeholder="e.g. Push Day">
-      </label>
-      <div class="mt-4">
-        <div class="row">
-          <strong>Exercises</strong>
-          <button id="btnAddExToTemplate" class="btn-small">+ ADD</button>
+  <div id="addExModal" class="overlay hidden">
+    <div class="modal-box exercise-editor" role="dialog" aria-modal="true" aria-labelledby="exModalTitle">
+      <div class="exercise-editor-header">
+        <h3 id="exModalTitle" tabindex="-1">NEW EXERCISE</h3>
+        <button id="btnCloseExModal" class="exercise-editor-close" type="button" aria-label="Close exercise editor">×</button>
+      </div>
+      <div class="exercise-editor-body">
+        <label class="exercise-field">Name
+          <input id="newExName" class="neo-input" autocomplete="off" placeholder="e.g. Assisted pull-up" required>
+        </label>
+        <div class="exercise-field-grid">
+          <label class="exercise-field">Type
+            <select id="newExType" class="neo-select">
+              <option value="strength">Strength</option>
+              <option value="cardio">Cardio</option>
+            </select>
+          </label>
+          <label id="muscleSelectWrapper" class="exercise-field">Muscle
+            <select id="newExMuscle" class="neo-select"></select>
+          </label>
         </div>
-        <div id="templateBuilderList" class="template-builder-list mt-2"></div>
+        <div id="strengthOptions" class="exercise-options">
+          <label class="exercise-field">Equipment <select id="newExEquip" class="neo-select"></select></label>
+          <label hidden>Increment <input id="newExInc" type="number" value="2.5" class="neo-input"></label>
+          <label class="exercise-field">Load type
+            <select id="newExLoadType" class="neo-select" aria-describedby="exerciseLoadHelp">
+              <option value="external">External weight</option>
+              <option value="bodyweight">Bodyweight</option>
+              <option value="assisted">Assisted bodyweight</option>
+              <option value="weighted">Weighted bodyweight</option>
+            </select>
+          </label>
+          <p id="exerciseLoadHelp" class="exercise-field-help">Log the weight you lift. Keep different variations as separate exercises.</p>
+        </div>
+        <div id="cardioOptions" class="exercise-options hidden">
+          <label class="exercise-field">Distance unit
+            <input id="newExCardioMetric" class="neo-input" placeholder="e.g. km, floors, laps" aria-describedby="cardioMetricHelp">
+          </label>
+          <p id="cardioMetricHelp" class="exercise-field-help">Defaults to km. Time is logged in minutes.</p>
+          <label hidden>Goal Type
+            <select id="newExCardioGoal" class="neo-select">
+              <option value="endurance">Endurance (distance/time)</option>
+              <option value="speed">Speed/Sprints (pace)</option>
+            </select>
+          </label>
+        </div>
       </div>
-      <div class="row mt-4">
-        <button id="btnCloseTemplateBuilder" class="btn-ghost">CANCEL</button>
-        <button id="btnSaveTemplateBuilder" class="btn-red">SAVE</button>
+      <footer class="exercise-editor-footer">
+        <button id="btnSaveEx" class="btn-red full" type="button">SAVE EXERCISE</button>
+        <button id="btnDeleteEx" class="exercise-archive hidden" type="button">Archive exercise</button>
+      </footer>
+    </div>
+  </div>
+
+  <div id="templateBuilderModal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="templateBuilderTitle">
+    <div class="modal-box routine-editor">
+      <header class="routine-editor-header">
+        <h3 id="templateBuilderTitle" tabindex="-1">CREATE ROUTINE</h3>
+        <button id="btnCloseTemplateBuilder" class="routine-editor-close" type="button" aria-label="Close routine editor">×</button>
+      </header>
+      <div id="templateBuilderBody" class="routine-editor-body">
+        <label class="routine-name-field" for="templateBuilderName">Routine name
+          <input id="templateBuilderName" class="neo-input" placeholder="e.g. Chest &amp; Arms" autocomplete="off" required>
+        </label>
+        <div class="routine-exercises-heading"><div><h4>Exercises</h4><span id="templateExerciseCount">0 exercises</span></div><button id="btnAddExToTemplate" class="btn-white" type="button">+ ADD</button></div>
+        <p id="routineReorderHelp" class="routine-sr-only">Drag a handle to reorder. On a keyboard, use the arrow keys.</p>
+        <div id="templateBuilderList" class="template-builder-list"></div>
+        <p id="templateBuilderStatus" class="routine-sr-only" role="status" aria-live="polite"></p>
       </div>
+      <footer class="routine-editor-footer">
+        <p id="templateBuilderError" role="alert"></p>
+        <button id="btnSaveTemplateBuilder" class="btn-red full" type="button">SAVE ROUTINE</button>
+      </footer>
     </div>
   </div>
 
@@ -393,9 +456,23 @@
     </div>
   </div>
 
+  </div>
+  <dialog id="appDialog" aria-labelledby="dialogTitle" aria-describedby="dialogMessage">
+    <h3 id="dialogTitle"></h3><p id="dialogMessage"></p>
+    <input id="dialogInput" class="neo-input full" aria-label="Confirmation text" hidden>
+    <div class="row gap-2 mt-4"><button id="dialogCancel" class="btn-black full">CANCEL</button><button id="dialogConfirm" class="btn-red full">CONFIRM</button></div>
+  </dialog>
+  <script src="storage.js"></script>
+  <script src="dates.js"></script>
+  <script src="exercise-load.js"></script>
+  <script src="logging.js"></script>
+  <script src="updates.js"></script>
+  <script src="chart-motion.js"></script>
+  <script src="history-editor.js"></script>
+  <script src="recaps.js"></script>
+  <script src="workout-motion.js"></script>
+  <script src="tap-feedback.js"></script>
   <script src="app.js"></script>
-  <script>
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js");
-  </script>
+  <script src="sliding-controls.js"></script>
 </body>
 </html>

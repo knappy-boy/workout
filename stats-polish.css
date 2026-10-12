@@ -1,0 +1,72 @@
+/* Containers stay still; only chart data animates. */
+#tab-stats .neo-card,#tab-stats .neo-card:active{transform:none}
+#tab-stats .neo-card>h2{margin-bottom:16px}
+#tab-stats .chart-container{border-radius:14px}
+#tab-stats canvas:focus-visible{outline:3px solid var(--red,#ff3333);outline-offset:3px;border-radius:10px}
+.bw-chart-container,#bwChart{touch-action:pan-y}
+.bw-chart-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 10px;flex-wrap:wrap}
+.bw-chart-toolbar .bw-period-tabs{gap:4px}
+.bw-chart-toolbar .bw-period-tab{min-height:44px;padding:5px 10px;border-color:#111;font-size:12px}
+.bw-chart-controls{display:flex;gap:3px;margin-left:auto}
+.bw-chart-controls button{width:40px;min-width:40px;min-height:44px;padding:0;border:2px solid #111;border-radius:11px;box-shadow:2px 2px 0 #111;font-size:19px;line-height:1}
+.bw-chart-controls button:last-child{font-size:22px}
+.chart-readout{position:absolute;top:7px;left:12px;z-index:2;width:max-content;max-width:min(260px,calc(100% - 24px));pointer-events:none;background:#fff;color:#111;border:2px solid #111;border-radius:9px;padding:6px 8px;box-shadow:2px 2px 0 #111;font-size:12px;font-weight:650;line-height:1.35;white-space:pre-line;font-variant-numeric:tabular-nums;max-height:calc(100% - 44px);overflow:hidden}
+.bw-chart-container .chart-readout{left:40px;max-width:calc(100% - 100px)}
+.chart-readout[hidden]{display:none}
+.chart-sr-only{position:absolute!important;width:1px!important;height:1px!important;max-width:1px!important;max-height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;clip-path:inset(50%)!important;white-space:nowrap!important;border:0!important;contain:layout paint}
+.stat-metric-note{line-height:1.5;margin:10px 0 0}
+#tab-stats .progress-controls{display:flex;flex-direction:column;align-items:stretch;gap:10px;min-width:0}
+.progress-exercise-pill{position:relative;min-width:0;width:100%;max-width:100%;isolation:isolate;--progress-muscle:#78909C}
+.progress-exercise-pill::after{content:"";position:absolute;left:12px;top:11px;bottom:11px;width:4px;border-radius:3px;background:var(--progress-muscle);pointer-events:none}
+#tab-stats #statExSelect{display:block;min-width:0;width:100%;max-width:100%;min-height:44px;padding-left:25px;padding-right:40px;border-radius:14px}
+#tab-stats #statChartType,#tab-stats #statLoadMode{width:100%;min-width:0;max-width:100%;min-height:44px}
+#tab-stats #statLoadMode[hidden]{display:none!important}
+#tab-stats #progressMetricSegments>button{min-height:40px;white-space:normal;overflow-wrap:anywhere}
+#breakdownLegend{align-content:start;gap:8px;padding-top:8px}
+#breakdownLegend .legend-tab{min-height:42px;padding:8px 12px;border:1px solid #111;border-radius:11px;box-shadow:none;font-size:12px;font-weight:750;transition:background-color 160ms ease}
+#breakdownLegend .legend-tab.inactive{opacity:1;color:var(--black,#111);box-shadow:none}
+#breakdownLegend .legend-tab:focus-visible,.bw-chart-toolbar button:focus-visible{outline:3px solid var(--red,#ff3333);outline-offset:3px}
+#breakdownCardio{font-size:12px;line-height:1.5}
+.theme-dark .bw-chart-toolbar .bw-period-tab,.theme-dark .bw-chart-controls button{border-color:#fff}
+.theme-dark .chart-readout{background:#202020;color:#fff;border-color:#fff}
+.theme-dark #breakdownLegend .legend-tab.inactive{color:#fff}
+@media(max-width:360px){.bw-chart-toolbar{gap:5px}.bw-chart-toolbar .bw-period-tab{padding-inline:8px}.bw-chart-controls button{width:38px;min-width:38px}}
+@media(prefers-reduced-motion:reduce){#breakdownLegend .legend-tab{transition:none}}
+.stat-set-estimate{display:block;font-size:10px;font-weight:500;opacity:.7;margin-top:3px}
+
+/* One date range controls both the exercise chart and its optional history. */
+.progress-range{margin:14px 0 6px}
+.progress-period-tabs{display:flex;flex-wrap:wrap;gap:6px}
+.progress-period-tab{min-height:42px;flex:1;min-width:52px;padding:7px 10px;border:2px solid var(--black,#111);border-radius:99px;background:transparent;color:var(--black,#111);font-size:12px;font-weight:750;cursor:pointer}
+.progress-period-tab.active{background:var(--black,#111);color:var(--white,#fff)}
+.progress-period-tab:focus-visible,.lift-history-toggle:focus-visible,.progress-custom-dates input:focus-visible{outline:3px solid var(--red,#ff3333);outline-offset:3px}
+.progress-custom-dates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
+.progress-custom-dates[hidden],.exercise-history-region[hidden]{display:none!important}
+.progress-custom-dates label{width:100%;max-width:100%;min-width:0;font-size:12px;font-weight:750;display:grid;grid-template-columns:minmax(0,1fr);gap:7px}
+/* iOS gives date fields an intrinsic control width. A bounded grid cell and a
+   plain native field keep both its border and internal value within the card. */
+.progress-date-field{display:grid;grid-template-columns:minmax(0,1fr);width:100%;min-width:0;max-width:100%;min-inline-size:0;max-inline-size:100%}
+.progress-custom-dates input{display:block;box-sizing:border-box;-webkit-appearance:none;appearance:none;width:100%;max-width:100%;min-width:0;inline-size:100%;max-inline-size:100%;min-inline-size:0;min-height:44px;padding:9px 8px;border:2px solid var(--black,#111);border-radius:10px;background:var(--white,#fff);color:var(--black,#111);font:inherit;font-size:14px}
+.progress-custom-dates input::-webkit-date-and-time-value{min-width:0;min-inline-size:0;text-align:left;}
+.progress-custom-dates input::-webkit-datetime-edit{min-width:0;min-inline-size:0;padding:0;}
+.progress-custom-dates input::-webkit-datetime-edit-fields-wrapper{min-width:0;padding:0;}
+@media(max-width:480px){.progress-custom-dates{grid-template-columns:minmax(0,1fr)}.progress-custom-dates input{font-size:16px}}
+.progress-range-status{margin:9px 0 0;min-height:18px;font-size:12px;line-height:1.5;color:var(--muted,#666)}
+.progress-range-status.is-error{color:#b12c26}
+.theme-dark .progress-range-status{color:#bbb}.theme-dark .progress-range-status.is-error{color:#ffaaa3}
+#tab-stats .exercise-history-wrapper{border:2px solid var(--black,#111);border-radius:13px;overflow:hidden;background:var(--white,#fff)}
+.exercise-history-heading-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px}
+#tab-stats .exercise-history-header{position:static;padding:0;margin:0;border:0;background:transparent;font-size:14px}
+.lift-history-toggle{display:grid;place-items:center;flex:none;width:44px;height:44px;padding:0;border:2px solid var(--black,#111);border-radius:50%;background:transparent;color:var(--black,#111);cursor:pointer}
+.lift-history-toggle svg{display:block;transition:transform 160ms ease}
+.lift-history-toggle[aria-expanded="true"] svg{transform:rotate(180deg)}
+.lift-history-toggle:disabled{cursor:default;opacity:.55}
+#tab-stats .exercise-history-region{border-top:2px solid var(--black,#111)}
+#tab-stats .exercise-history{max-height:300px;overflow-y:auto;padding:0 12px;overscroll-behavior:contain;scrollbar-gutter:stable;isolation:isolate;position:relative}
+#tab-stats .exercise-history:focus-visible{outline:3px solid var(--red,#ff3333);outline-offset:-3px}
+#tab-stats .ex-history-item{grid-template-columns:1fr;gap:7px;padding:13px 0}
+/* Native picker labels keep enough room for the shared 14px-inset chevron. */
+#tab-stats .breakdown-controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr));gap:10px;align-items:stretch}
+#tab-stats .breakdown-controls select{width:100%;min-width:0;min-height:44px;padding-left:12px;padding-right:40px;background-position:right 14px center;font-size:14px}
+@media(max-width:360px){.progress-period-tabs{gap:4px}.progress-period-tab{padding-inline:7px}.exercise-history-heading-row{padding-inline:10px}}
+@media(prefers-reduced-motion:reduce){.lift-history-toggle svg{transition:none}}
